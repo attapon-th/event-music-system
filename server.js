@@ -36,6 +36,10 @@ if (existsSync(envPath)) {
   }
 }
 
+const DEFAULT_REGION = /^[A-Za-z]{2}$/.test(process.env.DEFAULT_REGION || "") ? process.env.DEFAULT_REGION.toUpperCase() : "TH";
+const DEFAULT_LOCALE = process.env.DEFAULT_LOCALE || "th-TH";
+const youtubeOptions = { region: DEFAULT_REGION, locale: DEFAULT_LOCALE };
+
 const PORT = parseInt(process.env.PORT || "45416", 10);
 const LAN_IP = detectLanIp(process.env.HOST_IP);
 // PUBLIC_URL (e.g. https://grad-din-music.hangton.net) takes precedence when the
@@ -85,20 +89,20 @@ const app = express();
 app.set("trust proxy", true); // behind a reverse proxy — req.ip should read X-Forwarded-For
 app.use(express.json());
 
-// --- Host authentication (optional) ---------------------------------------
+// --- Host/Admin authentication ---------------------------------------
 // HOST_PASSWORD in .env gates the projector page (Basic Auth) and its controls
 // (a per-boot token the host page carries onto its WebSocket). Guests never
-// need it. Unset = open host page, for trusted-LAN setups.
+// need it. Unset disables privileged pages and controls.
 const HOST_PASSWORD = process.env.HOST_PASSWORD || "";
 const hostToken = randomUUID();
 function requireHostAuth(req, res, next) {
-  if (!HOST_PASSWORD) return next();
-  const b64 = (req.headers.authorization || "").split(" ")[1] || "";
+  if (!HOST_PASSWORD) return res.status(503).send("กรุณาตั้งค่า HOST_PASSWORD เพื่อใช้งาน Player และ Admin");
+  const b64 = (req.headers.authorization || "").match(/^Basic ([A-Za-z0-9+/=]+)$/i)?.[1] || "";
   const pass = Buffer.from(b64, "base64").toString().split(":").slice(1).join(":");
   if (pass === HOST_PASSWORD) return next();
-  res.set("WWW-Authenticate", 'Basic realm="Event Music Host"').status(401).send("Password required.");
+  res.set("WWW-Authenticate", 'Basic realm="Event Music Host"').status(401).send("กรุณาเข้าสู่ระบบด้วยรหัสผ่านผู้ดูแล");
 }
-app.use("/host.html", requireHostAuth); // the static copy must not bypass "/"
+app.use(["/host.html", "/admin.html"], requireHostAuth); // the static copy must not bypass "/"
 
 app.use(
   express.static(path.join(__dirname, "public"), {
@@ -116,7 +120,7 @@ const state = new JukeboxState();
 app.get("/api/info", async (_req, res) => {
   try {
     const qr = await QRCode.toDataURL(GUEST_URL, { width: 480, margin: 1 });
-    res.json({ guestUrl: GUEST_URL, qr, filterOn, moderationMode, moderationConfigured: moderationConfigured() });
+    res.json({ guestUrl: GUEST_URL, qr, filterOn, moderationMode, moderationConfigured: moderationConfigured(), defaultRegion: DEFAULT_REGION, defaultLocale: DEFAULT_LOCALE });
   } catch (err) {
     res.status(500).json({ error: String(err?.message || err) });
   }
@@ -142,10 +146,9 @@ app.get("/api/browse", async (req, res) => {
   const hit = browseCache.get(q);
   if (hit && Date.now() - hit.at < BROWSE_TTL_MS) return res.json({ results: hit.results });
   try {
-    // "__hk_hits" is a sentinel from the guest page's 全部 tab: serve YouTube's
-    // Hong Kong chart instead of a text search (which can't rank by region).
+    // Keep the old sentinel working; both use the configured country chart.
     const fetched =
-      q === "__hk_hits" ? await fetchChartHits({ limit: 40 }) : await searchYouTube(q, { limit: 40 });
+      ["__hits", "__hk_hits"].includes(q) ? await fetchChartHits({ ...youtubeOptions, limit: 40 }) : await searchYouTube(q, { ...youtubeOptions, limit: 40 });
     const results = fetched
       .filter((r) => durationSeconds(r.duration) <= MAX_SINGLE_SECONDS)
       .slice(0, 20);
@@ -154,7 +157,7 @@ app.get("/api/browse", async (req, res) => {
     res.json({ results });
   } catch (err) {
     console.error("[browse]", err.message);
-    res.status(502).json({ error: "Couldn't load songs. Try again." });
+    res.status(502).json({ error: "โหลดเพลงไม่สำเร็จ กรุณาลองใหม่" });
   }
 });
 
@@ -178,23 +181,30 @@ app.get("/api/search", async (req, res) => {
   const q = (req.query.q || "").toString().trim();
   if (!q) return res.json({ results: [] });
   try {
-    const results = await searchYouTube(q);
+    const results = await searchYouTube(q, youtubeOptions);
     res.json({ results });
   } catch (err) {
     console.error("[search]", err.message);
-    res.status(502).json({ error: "Search failed. Try again." });
+    res.status(502).json({ error: "ค้นหาไม่สำเร็จ กรุณาลองใหม่" });
   }
 });
 
 // Host page bootstrap, part 2: the WS control token (Basic-Auth-gated, so
 // only an authenticated host page can obtain it).
 app.get("/api/host-token", requireHostAuth, (_req, res) => {
-  res.json({ token: HOST_PASSWORD ? hostToken : "" });
+  res.set("Cache-Control", "no-store").json({ token: hostToken });
 });
 
 // Guest requests a song.
 app.post("/api/request", async (req, res) => {
   const { videoId, title, channel, duration, thumbnail, name, clientId } = req.body || {};
+  if (typeof videoId !== "string" || !/^[A-Za-z0-9_-]{11}$/.test(videoId) ||
+      typeof title !== "string" || !title.trim() || title.length > 500 ||
+      [channel, duration, thumbnail, name, clientId].some((v) => v !== undefined && v !== null && typeof v !== "string") ||
+      (thumbnail && !/^https:\/\/[^\s"<>]+$/.test(thumbnail))) {
+    return res.status(400).json({ ok: false, reason: "ข้อมูลเพลงไม่ถูกต้อง" });
+  }
+
   const floodKey = `${req.ip}|${(clientId || "").toString().slice(0, 64)}`;
   const last = lastRequestAt.get(floodKey);
   if (cooldownSeconds > 0 && last) {
@@ -202,21 +212,18 @@ app.post("/api/request", async (req, res) => {
     if (waitMs > 0) {
       const retryIn = Math.ceil(waitMs / 1000);
       // retryIn lets the guest page show a live countdown.
-      return res.json({ ok: false, reason: `Slow down — try again in ${retryIn}s.`, retryIn });
+      return res.json({ ok: false, reason: `กรุณารอ ${retryIn} วินาที แล้วลองใหม่`, retryIn });
     }
   }
 
-  if (!videoId || !title) {
-    return res.status(400).json({ ok: false, reason: "Missing song info." });
-  }
 
   if (state.queue.length >= MAX_QUEUE_LENGTH) {
-    return res.json({ ok: false, reason: "Queue is full — try again once it drains a bit." });
+    return res.json({ ok: false, reason: "คิวเพลงเต็ม กรุณาลองใหม่ภายหลัง" });
   }
 
   // Reject re-adding a song that's already playing or queued.
   if (state.has(videoId)) {
-    return res.json({ ok: false, reason: "That song is already in the queue!" });
+    return res.json({ ok: false, reason: "เพลงนี้อยู่ในคิวแล้ว" });
   }
 
   // Start the cooldown only now: the checks above are free and shouldn't lock
@@ -244,9 +251,13 @@ app.post("/api/request", async (req, res) => {
     }
   }
 
+  // Recheck after network work: simultaneous requests can otherwise bypass guardrails.
+  if (state.has(videoId)) return res.json({ ok: false, reason: "เพลงนี้อยู่ในคิวแล้ว" });
+  if (state.queue.length >= MAX_QUEUE_LENGTH) return res.json({ ok: false, reason: "คิวเพลงเต็ม กรุณาลองใหม่ภายหลัง" });
+
   // 3. Enqueue.
   const { item, position } = state.add({ videoId, title, channel, duration, thumbnail, addedBy: name });
-  res.json({ ok: true, reason: "Added!", position, id: item.id });
+  res.json({ ok: true, reason: "เพิ่มเข้าคิวแล้ว", position, id: item.id });
 });
 
 // Cloudflare overrides our no-cache with a 4h browser TTL on .js/.css, which
@@ -255,12 +266,16 @@ app.post("/api/request", async (req, res) => {
 const BOOT_ID = Date.now().toString(36);
 function versionedPage(name) {
   return readFileSync(path.join(__dirname, "public", name), "utf8").replace(
-    /(href|src)="\/((?:guest|host)\.(?:css|js))"/g,
+    /(href|src)="\/((?:guest|host|admin|i18n)\.(?:css|js))"/g,
     `$1="/$2?v=${BOOT_ID}"`
   );
 }
 const HOST_PAGE = versionedPage("host.html");
 const GUEST_PAGE = versionedPage("guest.html");
+const ADMIN_PAGE = versionedPage("admin.html");
+app.get("/admin", requireHostAuth, (_req, res) => {
+  res.set("Cache-Control", "no-cache").type("html").send(ADMIN_PAGE);
+});
 
 // Host page lives at "/".
 app.get("/", requireHostAuth, (_req, res) => {
@@ -268,7 +283,7 @@ app.get("/", requireHostAuth, (_req, res) => {
 });
 
 // Guest page — the QR code points here (extensionless, so static won't serve it).
-app.get("/guest", (_req, res) => {
+app.get(["/guest", "/explore"], (_req, res) => {
   res.set("Cache-Control", "no-cache").type("html").send(GUEST_PAGE);
 });
 
@@ -295,9 +310,8 @@ function broadcastState() {
 state.onChange = broadcastState;
 
 wss.on("connection", (ws) => {
-  // Without a password every socket may control (trusted-LAN setups);
-  // with one, only sockets that authenticate with the host token may.
-  ws.isHost = !HOST_PASSWORD;
+  // All sockets start read-only; only the protected token grants controls.
+  ws.isHost = false;
 
   // Send current state immediately on connect.
   ws.send(stateMessage());
@@ -309,11 +323,16 @@ wss.on("connection", (ws) => {
     } catch {
       return;
     }
+    if (!msg || typeof msg !== "object" || Array.isArray(msg)) return;
     if (msg.type === "auth") {
-      if (!HOST_PASSWORD || msg.token === hostToken) ws.isHost = true;
+      ws.isHost = !!HOST_PASSWORD && msg.token === hostToken;
+      ws.send(JSON.stringify({ type: "auth", ok: ws.isHost }));
       return;
     }
-    if (!ws.isHost) return; // every other message type is a host control
+    if (!ws.isHost) {
+      ws.send(JSON.stringify({ type: "error", error: "ไม่มีสิทธิ์ควบคุมเพลง" }));
+      return;
+    } // every other message type is a host control
     switch (msg.type) {
       case "ended": // host player finished a track
       case "error": // host player couldn't play (embed-disabled/region-locked)
@@ -322,7 +341,7 @@ wss.on("connection", (ws) => {
         } else {
           console.log(`[host] ended ${msg.videoId}`);
         }
-        state.advance(msg.videoId);
+        if (typeof msg.videoId === "string") state.advance(msg.videoId);
         break;
       case "skip":
         state.skip();
@@ -333,8 +352,28 @@ wss.on("connection", (ws) => {
       case "move":
         state.move(msg.id, msg.dir);
         break;
+      case "clear":
+        state.clear();
+        break;
+      case "reorder":
+        if (!state.reorder(msg.ids)) {
+          ws.send(JSON.stringify({ type: "error", error: "คิวเปลี่ยนแล้ว กรุณาจัดลำดับใหม่" }));
+          ws.send(stateMessage());
+        }
+        break;
+      case "playNow":
+        state.playNow(msg.id);
+        break;
+      case "play":
+      case "pause":
+        state.setPaused(msg.type === "pause");
+        break;
+      case "setVolume":
+        state.setVolume(msg.volume);
+        break;
       case "setFilter": // host cycled the content filter: off / on / strict
-        filterOn = !!msg.on;
+        if (typeof msg.on !== "boolean") break;
+        filterOn = msg.on;
         if (msg.mode === "strict" || msg.mode === "default") moderationMode = msg.mode;
         console.log(`[host] filter ${filterOn ? `ON (${moderationMode})` : "OFF"}`);
         saveSettings();
@@ -342,7 +381,8 @@ wss.on("connection", (ws) => {
         break;
       case "setCooldown": {
         // host adjusted the per-guest request cooldown (0 = off)
-        const s = Math.round(Number(msg.seconds));
+        if (typeof msg.seconds !== "number") break;
+        const s = Math.round(msg.seconds);
         if (Number.isFinite(s) && s >= 0 && s <= 300) {
           cooldownSeconds = s;
           console.log(`[host] request cooldown set to ${s ? s + "s" : "OFF"}`);
@@ -352,7 +392,8 @@ wss.on("connection", (ws) => {
         break;
       }
       case "setEventContext": // host described the venue/occasion for the filter
-        eventContext = (msg.context || "").toString().slice(0, 300);
+        if (typeof msg.context !== "string") break;
+        eventContext = msg.context.slice(0, 300);
         console.log(`[host] event context set to: ${eventContext || "(default)"}`);
         saveSettings();
         broadcastState();
@@ -370,7 +411,7 @@ server.listen(PORT, "0.0.0.0", () => {
       `LLM ${moderationConfigured() ? "configured" : "NOT configured — filter accepts all"}`
   );
   console.log(
-    `  Host password    : ${HOST_PASSWORD ? "SET — host page requires login" : "NOT SET — host page is open to anyone"}\n`
+    `  Host password    : ${HOST_PASSWORD ? "SET — host page requires login" : "NOT SET — Player/Admin disabled"}\n`
   );
   if (LAN_IP === "127.0.0.1") {
     console.warn("  ⚠  Could not detect a LAN IP — guests on other devices won't reach you.\n");

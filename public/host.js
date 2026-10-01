@@ -5,6 +5,8 @@ let player = null;
 let playerReady = false;
 let started = false;
 let currentVideoId = null;
+let playbackTarget = null;
+let appliedPaused = null;
 let latestState = { nowPlaying: null, queue: [] };
 let filterOn = false;
 let moderationMode = "default"; // "default" | "strict"
@@ -36,6 +38,8 @@ function connectWs() {
   };
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
+    if (msg.type === "auth" && !msg.ok) loadInfo();
+    if (msg.type === "auth" && msg.ok) reportIfEnded();
     if (msg.type === "state") {
       latestState = msg.state;
       if (typeof msg.filterOn === "boolean") filterOn = msg.filterOn;
@@ -70,6 +74,14 @@ window.onYouTubeIframeAPIReady = function () {
         if (e.data === YT.PlayerState.ENDED) {
           send({ type: "ended", videoId: currentVideoId });
         }
+        if (started && [YT.PlayerState.PLAYING, YT.PlayerState.PAUSED].includes(e.data)) {
+          const paused = e.data === YT.PlayerState.PAUSED;
+          if (playbackTarget !== null) {
+            if (paused === playbackTarget) playbackTarget = null;
+            else if (playbackTarget) player.pauseVideo();
+            else player.playVideo();
+          } else if (paused !== latestState.paused) send({ type: paused ? "pause" : "play" });
+        }
         updatePlayPauseIcon();
       },
       onError: (e) => {
@@ -89,6 +101,8 @@ function syncPlayer() {
 
   if (!np) {
     currentVideoId = null;
+    playbackTarget = null;
+    appliedPaused = null;
     if (player.stopVideo) player.stopVideo();
     idle.classList.remove("hidden");
     return;
@@ -96,10 +110,21 @@ function syncPlayer() {
   idle.classList.add("hidden");
   if (np.videoId !== currentVideoId) {
     currentVideoId = np.videoId;
+    appliedPaused = null;
+    playbackTarget = !!latestState.paused;
     player.loadVideoById(np.videoId);
-    player.playVideo();
     armPlaybackWatchdog(np.videoId);
   }
+  player.setVolume(latestState.volume ?? 100);
+  document.getElementById("volume").value = latestState.volume ?? 100;
+  document.getElementById("volume").style.setProperty("--vol", `${latestState.volume ?? 100}%`);
+  if (appliedPaused !== !!latestState.paused) {
+    appliedPaused = !!latestState.paused;
+    playbackTarget = appliedPaused;
+    if (appliedPaused) player.pauseVideo();
+    else player.playVideo();
+  }
+  updatePlayPauseIcon();
 }
 
 // Some broken embeds render a black frame without ever firing onError. If a
@@ -109,7 +134,7 @@ let playbackWatchdog = null;
 function armPlaybackWatchdog(videoId) {
   clearTimeout(playbackWatchdog);
   playbackWatchdog = setTimeout(() => {
-    if (currentVideoId !== videoId || !playerReady) return;
+    if (currentVideoId !== videoId || !playerReady || latestState.paused) return;
     const t = player.getCurrentTime ? player.getCurrentTime() : 0;
     const s = player.getPlayerState ? player.getPlayerState() : -1;
     if (t >= 1 || s === YT.PlayerState.PLAYING || s === YT.PlayerState.PAUSED) return;
@@ -145,7 +170,7 @@ function render() {
   document.getElementById("now-label").classList.toggle("hidden", !np);
   document.getElementById("now-title").textContent = np ? np.title : "—";
   document.getElementById("now-channel").textContent = np
-    ? np.channel + (np.addedBy ? ` · 點唱: ${np.addedBy}` : "")
+    ? np.channel + (np.addedBy ? ` · ${t("requester", { name: np.addedBy })}` : "")
     : "";
 
   const queue = latestState.queue || [];
@@ -153,7 +178,7 @@ function render() {
   const ul = document.getElementById("queue");
   ul.innerHTML = "";
   if (queue.length === 0) {
-    ul.innerHTML = '<li class="q-empty">Queue is empty — scan the QR to add a song.</li>';
+    ul.innerHTML = `<li class="q-empty">${t("Queue is empty — scan the QR to add a song.")}</li>`;
     return;
   }
   for (const item of queue) {
@@ -167,9 +192,9 @@ function render() {
         <div class="q-title"></div>
         <div class="q-sub"></div>
       </div>
-      <button class="q-remove" title="Remove">✕</button>`;
+      <button class="q-remove" title="${t("Remove")}">✕</button>`;
     li.querySelector(".q-title").textContent = item.title;
-    li.querySelector(".q-sub").textContent = item.addedBy ? `點唱: ${item.addedBy}` : item.channel;
+    li.querySelector(".q-sub").textContent = item.addedBy ? t("requester", { name: item.addedBy }) : item.channel;
     li.querySelector(".q-remove").onclick = () => send({ type: "remove", id: item.id });
     ul.appendChild(li);
   }
@@ -183,8 +208,8 @@ const CLOCK_SVG =
 function renderFilter() {
   const btn = document.getElementById("filter-toggle");
   const strict = filterOn && moderationMode === "strict";
-  const label = !filterOn ? "關" : strict ? "嚴格" : "開";
-  btn.innerHTML = `${SHIELD_SVG}<span>過濾：${label}</span>`;
+  const label = !filterOn ? t("關") : strict ? t("嚴格") : t("開");
+  btn.innerHTML = `${SHIELD_SVG}<span>${t("filter", { label })}</span>`;
   btn.classList.toggle("on", filterOn && !strict);
   btn.classList.toggle("strict", strict);
   // Warn if the filter is on but no LLM key is configured (it'll accept all).
@@ -193,7 +218,7 @@ function renderFilter() {
 
 function renderCooldown() {
   const btn = document.getElementById("cooldown-toggle");
-  btn.innerHTML = `${CLOCK_SVG}<span>冷卻：${cooldownSeconds ? cooldownSeconds + "s" : "關"}</span>`;
+  btn.innerHTML = `${CLOCK_SVG}<span>${t("cooldown", { seconds: cooldownSeconds || t("關") })}</span>`;
   btn.classList.toggle("on", cooldownSeconds > 0);
 }
 
@@ -217,10 +242,7 @@ function updatePlayPauseIcon() {
 // ---- Controls ---------------------------------------------------------
 function wireControls() {
   document.getElementById("playpause").onclick = () => {
-    if (!playerReady) return;
-    const s = player.getPlayerState();
-    if (s === YT.PlayerState.PLAYING) player.pauseVideo();
-    else player.playVideo();
+    send({ type: latestState.paused ? "play" : "pause" });
   };
   document.getElementById("skip").onclick = () => send({ type: "skip" });
   // Filter pill cycles: 關 → 開 (normal) → 嚴格 (family-friendly only) → 關.
@@ -240,7 +262,7 @@ function wireControls() {
   paintVol();
   volEl.oninput = () => {
     paintVol();
-    if (playerReady) player.setVolume(parseInt(volEl.value, 10));
+    send({ type: "setVolume", volume: Number(volEl.value) });
   };
   // Event-context editor: the 場景 pill reveals an input; 儲存 sends it.
   const ctxRow = document.getElementById("context-row");
@@ -275,11 +297,13 @@ async function loadInfo() {
     moderationConfigured = !!info.moderationConfigured;
     renderFilter();
   } catch (err) {
-    document.getElementById("guest-url").textContent = "Could not load guest link";
+    document.getElementById("guest-url").textContent = t("Could not load guest link");
   }
   try {
     // The browser reuses the page's Basic Auth credentials for this fetch.
-    hostToken = (await (await fetch("/api/host-token")).json()).token || null;
+    const response = await fetch("/api/host-token");
+    if (!response.ok) throw new Error("Authentication failed");
+    hostToken = (await response.json()).token;
     sendAuth(); // the WS may have connected before the token arrived
   } catch {
     /* no password mode, or offline — controls stay open or inert */

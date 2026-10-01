@@ -11,6 +11,8 @@ export class JukeboxState {
   constructor() {
     this.nowPlaying = null; // current item or null
     this.queue = []; // upcoming items
+    this.paused = false;
+    this.volume = 100;
     this.history = []; // played items (most recent last), capped
     this.onChange = () => {};
   }
@@ -25,6 +27,8 @@ export class JukeboxState {
       nowPlaying: this.nowPlaying,
       queue: this.queue,
       historyCount: this.history.length,
+      paused: this.paused,
+      volume: this.volume,
     };
   }
 
@@ -61,7 +65,7 @@ export class JukeboxState {
   // Advance to the next song. `finishedVideoId` guards against double-advances
   // from duplicate "ended"/"error" events for the same track.
   advance(finishedVideoId) {
-    if (finishedVideoId && this.nowPlaying && this.nowPlaying.videoId !== finishedVideoId) {
+    if (finishedVideoId && this.nowPlaying?.videoId !== finishedVideoId) {
       return; // stale event for a track we already moved past
     }
     if (this.nowPlaying) {
@@ -69,6 +73,7 @@ export class JukeboxState {
       if (this.history.length > 100) this.history.shift();
     }
     this.nowPlaying = this.queue.shift() || null;
+    this.paused = false;
     this._emit();
   }
 
@@ -87,10 +92,46 @@ export class JukeboxState {
   // Move an upcoming item up/down (host control).
   move(id, dir) {
     const i = this.queue.findIndex((s) => s.id === id);
-    if (i === -1) return;
+    if (i === -1 || !["up", "down"].includes(dir)) return;
     const j = dir === "up" ? i - 1 : i + 1;
     if (j < 0 || j >= this.queue.length) return;
     [this.queue[i], this.queue[j]] = [this.queue[j], this.queue[i]];
+    this._emit();
+  }
+
+  clear() {
+    this.queue = [];
+    this._emit();
+  }
+
+  // Apply only a complete permutation: stale clients cannot lose new requests.
+  reorder(ids) {
+    if (!Array.isArray(ids) || ids.length !== this.queue.length ||
+        new Set(ids).size !== ids.length) return false;
+    const items = new Map(this.queue.map((item) => [item.id, item]));
+    if (!ids.every((id) => items.has(id))) return false;
+    this.queue = ids.map((id) => items.get(id));
+    this._emit();
+    return true;
+  }
+
+  playNow(id) {
+    const index = this.queue.findIndex((item) => item.id === id);
+    if (index < 0) return;
+    const [item] = this.queue.splice(index, 1);
+    this.queue.unshift(item);
+    this.advance();
+  }
+
+  setPaused(paused) {
+    if (typeof paused !== "boolean") return;
+    this.paused = paused;
+    this._emit();
+  }
+
+  setVolume(volume) {
+    if (typeof volume !== "number" || !Number.isFinite(volume) || volume < 0 || volume > 100) return;
+    this.volume = Math.round(volume);
     this._emit();
   }
 }

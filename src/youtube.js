@@ -15,7 +15,7 @@ const UA =
 // otherwise replaces ytInitialData with an interstitial.
 const COMMON_HEADERS = {
   "User-Agent": UA,
-  "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Language": "th-TH,th;q=0.9,en;q=0.8",
   Cookie: "SOCS=CAI;CONSENT=YES+1",
 };
 
@@ -29,7 +29,7 @@ function pickThumbnail(thumbs) {
 // InnerTube search filter for the "Songs" category (same value ytmusicapi uses).
 const SONGS_FILTER = "EgWKAQIIAWoMEA4QChADEAQQCRAF";
 
-export async function searchYouTube(query, { limit = 12, timeoutMs = 8000 } = {}) {
+export async function searchYouTube(query, { limit = 12, timeoutMs = 8000, region = "TH", locale = "th-TH" } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let data;
@@ -44,7 +44,7 @@ export async function searchYouTube(query, { limit = 12, timeoutMs = 8000 } = {}
       },
       body: JSON.stringify({
         context: {
-          client: { clientName: "WEB_REMIX", clientVersion: "1.20250101.01.00", hl: "en" },
+          client: { clientName: "WEB_REMIX", clientVersion: "1.20250101.01.00", hl: locale.split("-")[0], gl: region },
         },
         query,
         params: SONGS_FILTER,
@@ -89,35 +89,44 @@ export async function searchYouTube(query, { limit = 12, timeoutMs = 8000 } = {}
   return results;
 }
 
-// YouTube's own "Daily Top Music Videos - Hong Kong" chart playlist — the
-// closest thing to an official HK hit list (YT Music has no song chart for HK).
-const HK_CHART_PLAYLIST = "VLPL4fGSI1pDJn6mlLn-G3Wy5IkOy0c6vAWp";
+// YouTube's daily top music videos for the configured country.
+// Country charts are discovered from YouTube rather than hard-coding a playlist.
+function findChartPlaylist(data) {
+  if (!data || typeof data !== "object") return null;
+  const id = data.musicTwoRowItemRenderer?.navigationEndpoint?.browseEndpoint?.browseId;
+  if (id?.startsWith("VLPL")) return id;
+  for (const value of Object.values(data)) {
+    const found = findChartPlaylist(value);
+    if (found) return found;
+  }
+  return null;
+}
 
-// Current Hong Kong chart hits, in the same shape as searchYouTube() results.
+// Current country chart hits, in the same shape as searchYouTube() results.
 // Items are music videos (that's what the chart tracks); they play the same.
-export async function fetchChartHits({ limit = 40, timeoutMs = 8000 } = {}) {
+export async function fetchChartHits({ limit = 40, timeoutMs = 8000, region = "TH", locale = "th-TH" } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let data;
   try {
-    const res = await fetch("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false", {
-      method: "POST",
-      headers: {
-        ...COMMON_HEADERS,
-        "Content-Type": "application/json",
-        Origin: "https://music.youtube.com",
-        Referer: "https://music.youtube.com/",
-      },
-      body: JSON.stringify({
-        context: {
-          client: { clientName: "WEB_REMIX", clientVersion: "1.20250101.01.00", hl: "en", gl: "HK" },
-        },
-        browseId: HK_CHART_PLAYLIST,
-      }),
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`YouTube Music responded ${res.status}`);
-    data = await res.json();
+    const browse = async (browseId, extra = {}) => {
+      const res = await fetch("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false", {
+        method: "POST",
+        headers: { ...COMMON_HEADERS, "Content-Type": "application/json", Origin: "https://music.youtube.com" },
+        body: JSON.stringify({
+          context: { client: { clientName: "WEB_REMIX", clientVersion: "1.20250101.01.00", hl: locale.split("-")[0], gl: region } },
+          browseId,
+          ...extra,
+        }),
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`YouTube Music responded ${res.status}`);
+      return res.json();
+    };
+    const charts = await browse("FEmusic_charts", { formData: { selectedValues: [region] } });
+    const playlist = findChartPlaylist(charts);
+    if (!playlist) throw new Error("YouTube country chart unavailable");
+    data = await browse(playlist);
   } finally {
     clearTimeout(timer);
   }
@@ -166,10 +175,10 @@ export async function checkPlayable(videoId, { timeoutMs = 5000 } = {}) {
   try {
     const res = await fetch(url, { headers: { "User-Agent": UA }, signal: controller.signal });
     if (res.status === 200) return { ok: true };
-    if (res.status === 401) return { ok: false, reason: "This video has embedding disabled." };
+    if (res.status === 401) return { ok: false, reason: "วิดีโอนี้ไม่อนุญาตให้เล่นแบบฝัง" };
     if (res.status === 404 || res.status === 400)
-      return { ok: false, reason: "This video is private, deleted, or doesn't exist." };
-    return { ok: false, reason: `This video can't be played (status ${res.status}).` };
+      return { ok: false, reason: "วิดีโอนี้เป็นส่วนตัว ถูกลบ หรือไม่มีอยู่" };
+    return { ok: false, reason: `ไม่สามารถเล่นวิดีโอนี้ได้ (สถานะ ${res.status})` };
   } catch (err) {
     // Network hiccup — don't block on it; let the host player be the backstop.
     return { ok: true, soft: true, note: String(err?.message || err) };

@@ -21,8 +21,8 @@
   --warm-soft: oklch(84% 0.03 60);
   --muted: oklch(56% 0.025 320);
   --faint: oklch(50% 0.02 320);
-  --serif: "Noto Serif TC", serif;
-  --sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --serif: "Noto Serif Thai", serif;
+  --sans: "Noto Sans Thai", sans-serif;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

@@ -112,8 +112,8 @@ function buildMessages(song, details, { strict, eventContext, webSearch }) {
       : null,
 
     'OUTPUT: respond ONLY with JSON of the form {"approved": boolean, "reason": string}. The ' +
-      "reason is shown to the guest who requested the song: write it in Traditional Chinese " +
-      "(繁體中文，香港用語), keep it short and friendly, and include no URLs or citations.",
+      "reason is shown to the guest who requested the song: write it in Thai " +
+      "(ภาษาไทย), keep it short and friendly, and include no URLs or citations.",
   ];
 
   const policy = rules.filter(Boolean).join("\n\n");
@@ -154,7 +154,7 @@ function extractJson(text) {
   }
 }
 
-const APPROVED = { approved: true, reason: "Added!", moderated: false };
+const APPROVED = { approved: true, reason: "เพิ่มเข้าคิวแล้ว", moderated: false };
 
 export async function moderate(song, details = null, opts = {}) {
   const c = config(opts);
@@ -201,24 +201,24 @@ export async function moderate(song, details = null, opts = {}) {
     // a REJECT, not a hiccup: fail closed here, unlike network errors.
     if (choice?.finish_reason === "content_filter") {
       console.warn(`[moderation] provider content_filter — rejecting. ${text.slice(0, 150)}`);
-      return { approved: false, reason: "這首歌不太適合這個場合。", moderated: true };
+      return { approved: false, reason: "เพลงนี้ไม่เหมาะกับงานนี้", moderated: true };
     }
     // No structured verdict (refusal prose, missing/invalid JSON): the model
     // dodged the question — reject. Only infrastructure failures fail open.
     const parsed = extractJson(text);
     if (!parsed || typeof parsed.approved !== "boolean") {
       console.warn(`[moderation] no structured verdict — rejecting. ${text.slice(0, 150)}`);
-      return { approved: false, reason: "這首歌不太適合這個場合。", moderated: true };
+      return { approved: false, reason: "เพลงนี้ไม่เหมาะกับงานนี้", moderated: true };
     }
     // The web plugin makes models append markdown citation links ("[youtube.com](https://…)");
     // the reason is shown raw to the guest, so drop them.
-    const reason = String(parsed.reason || (parsed.approved ? "Added!" : "這首歌不太適合這個場合。"))
+    const reason = String(parsed.reason || (parsed.approved ? "เพิ่มเข้าคิวแล้ว" : "เพลงนี้ไม่เหมาะกับงานนี้"))
       .replace(/\s*\[[^\]]*\]\([^)]*\)/g, "")
       .replace(/\s*\b(?:see|source|sources)\s*[:.]?\s*$/i, "") // fragment left by a stripped trailing citation
       .trim();
     return {
       approved: parsed.approved,
-      reason: reason || (parsed.approved ? "Added!" : "這首歌不太適合這個場合。"),
+      reason: reason || (parsed.approved ? "เพิ่มเข้าคิวแล้ว" : "เพลงนี้ไม่เหมาะกับงานนี้"),
       moderated: true,
     };
   } catch (err) {
@@ -229,7 +229,7 @@ export async function moderate(song, details = null, opts = {}) {
     // filter off live. Network errors below still fail open.
     if (err?.name === "AbortError") {
       console.warn(`[moderation] timeout after ${timeoutMs}ms — rejecting (guest may retry).`);
-      return { approved: false, reason: "系統繁忙，請再試一次。", moderated: false };
+      return { approved: false, reason: "ระบบกำลังยุ่ง กรุณาลองใหม่", moderated: false };
     }
     console.warn(`[moderation] error — failing open. ${err?.message || ""}`);
     return APPROVED;

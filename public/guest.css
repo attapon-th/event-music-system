@@ -28,8 +28,8 @@
   --ok-ink: oklch(20% 0.05 150);
   --ok-text: oklch(96% 0.02 150);
   --ok-sub: oklch(80% 0.05 150);
-  --serif: "Noto Serif TC", serif;
-  --sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --serif: "Noto Serif Thai", serif;
+  --sans: "Noto Sans Thai", sans-serif;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }

@@ -3,20 +3,32 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title data-i18n="點歌 · Add a Song">เพิ่มเพลง — ระบบเพลงส่วนกลาง</title>
+  <title data-i18n="admin">ผู้ดูแลเพลง</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/guest.css" />
+  <link rel="stylesheet" href="/admin.css" />
 </head>
-<body>
+<body data-admin="true">
   <header>
-    <h1 data-i18n="點歌">เพิ่มเพลง</h1>
-    <div class="h-sub" data-i18n="Add a Song">เลือกเพลงที่อยากฟัง</div>
+    <h1 data-i18n="admin">ผู้ดูแลเพลง</h1>
+    <nav><a href="/" data-i18n="playerLink">เปิด Player</a> · <a href="/guest" data-i18n="guestLink">เปิดหน้าผู้ฟัง</a></nav>
+    <p id="connection" role="status"></p>
   </header>
 
   <div id="now-playing" class="now-playing hidden"></div>
 
+  <section class="admin-controls" aria-label="ควบคุมเพลง">
+    <button id="admin-play" data-i18n="play" disabled></button>
+    <button id="admin-pause" data-i18n="pause" disabled></button>
+    <button id="admin-skip" data-i18n="skip" disabled></button>
+    <label><span data-i18n="volume"></span> <output id="admin-volume-value">100%</output>
+      <input id="admin-volume" type="range" min="0" max="100" value="100" aria-label="ระดับเสียง" data-i18n-aria-label="volume" disabled />
+    </label>
+    <button id="admin-clear" data-i18n="clear" disabled></button>
+  </section>
+  <p id="admin-feedback" role="status" aria-live="polite"></p>
   <div class="name-wrap">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.2" r="3.4"></circle><path d="M4.8 20c1.3-4.2 4.2-6.3 7.2-6.3s5.9 2.1 7.2 6.3"></path></svg>
     <input id="name" type="text" placeholder="ชื่อของคุณ (ไม่จำเป็น)" data-i18n-placeholder="你的名字（可不填）· your name (optional)" autocomplete="off" maxlength="40" />
@@ -31,17 +43,9 @@
     </button>
   </form>
 
-  <section id="suggestions-section">
-    <div class="sug-head">
-      <span class="sec-title"><span data-i18n="Explore"></span> <small data-i18n="Explore">เพลงแนะนำ</small></span>
-      <button id="shuffle" class="shuffle">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7h3.8L16 17.2h4.5"></path><path d="M3.5 17h3.8L10 13"></path><path d="M15.5 7h5"></path><path d="M18.2 4.3L20.5 7l-2.3 2.7"></path><path d="M18.2 14.5l2.3 2.5-2.3 2.7"></path></svg>
-        <span data-i18n="隨機"></span>
-      </button>
-    </div>
-    <div id="singers" class="singers"></div>
-    <div id="genre-tabs" class="genre-tabs"></div>
-  </section>
+  <div id="suggestions-section" class="hidden">
+    <div id="singers"></div><div id="genre-tabs"></div><button id="shuffle" type="button"></button>
+  </div>
 
   <button id="back-to-explore" class="back-to-explore hidden" data-i18n="← 返回點唱台 · Back to Explore">← กลับไปสำรวจเพลง</button>
   <div id="status" class="status hidden"></div>
@@ -61,5 +65,6 @@
 
   <script src="/i18n.js"></script>
   <script src="/guest.js"></script>
+  <script src="/admin.js"></script>
 </body>
 </html>

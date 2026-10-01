@@ -17,13 +17,12 @@ const backToExploreBtn = document.getElementById("back-to-explore");
 // to steer away from compilations — the ≤10 min server filter is the backstop.
 const THIS_YEAR = new Date().getFullYear();
 const GENRE_QUERIES = {
-  // "__hk_hits" is a server-side sentinel (not a search): YouTube's Hong Kong
-  // chart. Generic text queries like "hit songs" rank by literal title match,
-  // not local popularity, so the chart is what makes 全部 show HK hits first.
-  All: ["__hk_hits", `廣東歌 ${THIS_YEAR}`, `K-pop ${THIS_YEAR}`, "party anthems"],
+  // The first load uses the configured country's actual YouTube chart.
+  All: ["__hits", `เพลงไทยยอดนิยม ${THIS_YEAR}`, `K-pop ${THIS_YEAR}`, "party anthems"],
   // No singer chips for this tab on purpose — graduation songs are a theme,
   // not an artist roster (no GENRE_SLUG entry, so the singer row stays empty).
-  Graduation: ["畢業歌", "畢業歌 廣東歌", "友誼 畢業 歌曲", "graduation songs"],
+  Graduation: ["เพลงปัจฉิม", "เพลงมิตรภาพ", "graduation songs"],
+  Thai: [`เพลงไทย ${THIS_YEAR}`, "T-pop", "เพลงไทยยอดนิยม"],
   "K-pop": [`K-pop ${THIS_YEAR}`, "K-pop dance hits", "K-pop girl group hits"],
   Cantopop: [`廣東歌 ${THIS_YEAR}`, "香港歌手 新歌", "廣東歌 熱門"],
   Mandopop: ["華語 新歌", `華語流行 ${THIS_YEAR}`, "國語 經典"],
@@ -33,8 +32,8 @@ const GENRE_QUERIES = {
 };
 // Display: Chinese label + inline icon per genre (keys stay English — they
 // index GENRE_QUERIES and the singer-filter slugs).
-const GENRE_LABEL = { All: "全部", Graduation: "畢業歌", "K-pop": "K-pop", Cantopop: "廣東歌", Mandopop: "國語歌", Western: "歐美", Party: "派對", Classics: "經典" };
-const GENRE_ICON = {
+const GENRE_LABEL = { Thai: t("เพลงไทย"), All: t("全部"), Graduation: t("畢業歌"), "K-pop": "K-pop", Cantopop: t("廣東歌"), Mandopop: t("國語歌"), Western: t("歐美"), Party: t("派對"), Classics: t("經典") };
+const GENRE_ICON = { Thai: "♫",
   All: '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="2.6"/><circle cx="17" cy="7" r="2.6"/><circle cx="7" cy="17" r="2.6"/><circle cx="17" cy="17" r="2.6"/></svg>',
   Graduation: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 9.5L12 5l9.5 4.5L12 14z"/><path d="M6.5 11.8v4.2c0 1.1 2.5 2.5 5.5 2.5s5.5-1.4 5.5-2.5v-4.2"/><path d="M21.5 9.5v5"/></svg>',
   "K-pop": '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.2-4.4-9.7-9.1A5 5 0 0112 5.6a5 5 0 019.7 5.3C19.2 15.6 12 20 12 20z"/></svg>',
@@ -44,9 +43,10 @@ const GENRE_ICON = {
   Party: '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l2 6.2h6.4l-5.2 3.9 2 6.4-5.2-4-5.2 4 2-6.4-5.2-3.9h6.4z"/></svg>',
   Classics: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/></svg>',
 };
-const GENRE_SLUG = { "K-pop": "kpop", Cantopop: "canto", Mandopop: "mando", Western: "western", Party: "party", Classics: "classics" };
+const GENRE_SLUG = { Thai: "thai", "K-pop": "kpop", Cantopop: "canto", Mandopop: "mando", Western: "western", Party: "party", Classics: "classics" };
 
 const SINGERS = [
+  ...["BOWKYLION", "นนท์ ธนนท์", "Tilly Birds", "Three Man Down", "Jeff Satur", "โจอี้ ภูวศิษฐ์", "Bodyslam", "LISA"].map((n) => ({ n, q: n, g: "thai" })),
   { n: "陳奕迅", q: "陳奕迅 Eason Chan", g: "canto" },
   { n: "林家謙", q: "林家謙 Terence Lam", g: "canto" },
   { n: "姜濤", q: "姜濤 Keung To", g: "canto" },
@@ -193,7 +193,7 @@ function selectSinger(s) {
   activeKey = `singer:${s.n}`;
   renderGenreTabs();
   renderSingers();
-  startBrowse([s.q, `${s.q} 熱門歌曲`, `${s.q} hits`]);
+  startBrowse([s.q, `${s.q} popular songs`, `${s.q} hits`]);
 }
 
 async function startBrowse(queries) {
@@ -212,7 +212,7 @@ async function startBrowse(queries) {
 async function loadMoreSongs() {
   const gen = browse.gen;
   moreBtn.disabled = true;
-  setStatus("載入歌曲中… Loading songs…");
+  setStatus(t("載入歌曲中… Loading songs…"));
   try {
     while (browse.idx < browse.queries.length) {
       const q = browse.queries[browse.idx++];
@@ -220,7 +220,7 @@ async function loadMoreSongs() {
       if (browse.gen !== gen) return; // stale — a newer tab/search/shuffle took over
       const data = await res.json();
       if (browse.gen !== gen) return;
-      if (!res.ok) throw new Error(data.error || "Couldn't load songs.");
+      if (!res.ok) throw new Error(data.error || t("Couldn't load songs."));
       let fresh = (data.results || []).filter((r) => r.videoId && !browse.seen.has(r.videoId));
       if (fresh.length === 0) continue; // this variant was all dupes — try the next one
       for (const r of fresh) browse.seen.add(r.videoId);
@@ -230,7 +230,7 @@ async function loadMoreSongs() {
       break;
     }
     if (browse.gen === gen && browse.seen.size === 0) {
-      setStatus("沒有找到歌曲 — 試試其他分類。No songs found — try another tab.");
+      setStatus(t("沒有找到歌曲 — 試試其他分類。No songs found — try another tab."));
     }
   } catch (err) {
     if (browse.gen === gen) setStatus("😕 " + err.message);
@@ -262,12 +262,12 @@ async function doSearch(q) {
   resultsEl.innerHTML = "";
   sugSection.classList.add("hidden"); // hide explore once searching
   moreBtn.classList.add("hidden");
-  backToExploreBtn.classList.remove("hidden");
-  setStatus("搜尋中… Searching…");
+  if (document.body.dataset.admin !== "true") backToExploreBtn.classList.remove("hidden");
+  setStatus(t("搜尋中… Searching…"));
   try {
     const res = await fetch("/api/search?q=" + encodeURIComponent(q));
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Search failed");
+    if (!res.ok) throw new Error(data.error || t("Search failed"));
     renderResults(data.results || []);
   } catch (err) {
     setStatus("😕 " + err.message);
@@ -281,8 +281,10 @@ function backToExplore() {
   resultsEl.innerHTML = "";
   setStatus("");
   backToExploreBtn.classList.add("hidden");
-  sugSection.classList.remove("hidden");
-  startBrowse(browse.queries);
+  if (document.body.dataset.admin !== "true") {
+    sugSection.classList.remove("hidden");
+    startBrowse(browse.queries);
+  }
 }
 
 backToExploreBtn.onclick = backToExplore;
@@ -305,7 +307,7 @@ function resultCard(r) {
       <div class="r-title"></div>
       <div class="r-sub"></div>
     </div>
-    <button class="add-btn" title="Add">+</button>`;
+    <button class="add-btn" title="${t("Add")}">+</button>`;
   li.querySelector(".r-title").textContent = r.title;
   li.querySelector(".r-sub").textContent = r.channel + (r.duration ? ` · ${r.duration}` : "");
   const btn = li.querySelector(".add-btn");
@@ -318,7 +320,7 @@ function appendResults(results) {
 }
 
 function renderResults(results) {
-  if (results.length === 0) return setStatus("沒有結果，試試其他關鍵字。No results — try a different search.");
+  if (results.length === 0) return setStatus(t("沒有結果，試試其他關鍵字。No results — try a different search."));
   setStatus("");
   resultsEl.innerHTML = "";
   appendResults(results);
@@ -361,7 +363,7 @@ async function requestSong(song, btn) {
   // Persistent, animated "checking" card — with the web-searching filter a
   // verdict can take 5–20s, so it must read as activity, not a frozen toast.
   // Subline names the song: several checks can be in flight at once.
-  const t = toast("info", "🔎", "檢查歌曲中…", { persist: true, sub: song.title, checking: true });
+  const notice = toast("info", "🔎", t("檢查歌曲中…"), { persist: true, sub: song.title, checking: true });
   try {
     const res = await fetch("/api/request", {
       method: "POST",
@@ -370,26 +372,29 @@ async function requestSong(song, btn) {
     });
     const data = await res.json();
     if (data.ok) {
-      const main = data.position === 0 ? "已加入 · 現正播放" : `已加入 · 排第 ${data.position} 首`;
-      const sub = data.position === 0 ? "Added — playing now!" : `Added — #${data.position} in the queue!`;
-      t.set("ok", "✓", main, { sub });
+      const main = data.position === 0 ? t("已加入 · 現正播放") : t("position", { position: data.position });
+      const sub = data.position === 0 ? t("Added — playing now!") : t("position", { position: data.position });
+      notice.set("ok", "✓", main, { sub });
       btn.textContent = "✓";
       if (data.id) {
         rememberMyRequest(data.id);
         // The queue broadcast usually lands before this response does, so the
         // row was rendered without knowing it's ours — re-render for the badge.
-        if (lastQueueState) renderQueue(lastQueueState);
+        if (lastQueueState) {
+          if (document.body.dataset.admin === "true") renderAdmin();
+          else renderQueue(lastQueueState);
+        }
       }
     } else {
       if (data.retryIn) {
-        t.dismiss();
+        notice.dismiss();
         cooldownToast(data.retryIn);
-      } else t.set("bad", "🚫", data.reason || "Couldn't add that song.");
+      } else notice.set("bad", "🚫", data.reason || t("Couldn't add that song."));
       btn.disabled = false;
       btn.textContent = "+";
     }
   } catch (err) {
-    t.set("bad", "⚠️", "網絡錯誤，請再試。", { sub: "Network error. Try again." });
+    notice.set("bad", "⚠️", t("網絡錯誤，請再試。"), { sub: t("Network error. Try again.") });
     btn.disabled = false;
     btn.textContent = "+";
   }
@@ -441,16 +446,16 @@ function cooldownToast(seconds) {
   if (!cooldownToast._h?.el.isConnected) {
     cooldownToast._h = toast("bad", "⏳", "", { persist: true });
   }
-  const t = cooldownToast._h;
+  const notice = cooldownToast._h;
   let left = seconds;
   const draw = () =>
-    t.set("bad", "⏳", `再等 ${left} 秒`, { persist: true, sub: `Next song in ${left}s…` });
+    notice.set("bad", "⏳", t("wait", { seconds: left }), { persist: true, sub: t("wait", { seconds: left }) });
   draw();
   cooldownToast._i = setInterval(() => {
     left--;
     if (left <= 0) {
       clearInterval(cooldownToast._i);
-      t.dismiss();
+      notice.dismiss();
     } else draw();
   }, 1000);
 }
@@ -481,14 +486,14 @@ function renderQueue(state) {
       <div class="np-body">
         <div class="np-label">
           <span class="eq"><span></span><span></span><span></span></span>
-          現正播放 NOW PLAYING
+          ${t("nowPlaying")}
         </div>
         <div class="np-title"></div>
         <div class="np-sub"></div>
       </div>`;
     npEl.querySelector(".np-title").textContent = np.title;
     npEl.querySelector(".np-sub").textContent =
-      (np.channel || "") + (np.addedBy ? ` · 點唱: ${np.addedBy}` : "");
+      (np.channel || "") + (np.addedBy ? ` · ${t("requester", { name: np.addedBy })}` : "");
   } else {
     npEl.classList.add("hidden");
   }
@@ -498,7 +503,7 @@ function renderQueue(state) {
   const ul = document.getElementById("queue");
   ul.innerHTML = "";
   if (queue.length === 0) {
-    ul.innerHTML = '<li class="q-empty">暫時未有歌曲 — 快啲點歌啦！Nothing queued yet — be the first!</li>';
+    ul.innerHTML = `<li class="q-empty">${t("暫時未有歌曲 — 快啲點歌啦！Nothing queued yet — be the first!")}</li>`;
     return;
   }
   const myIds = loadMyRequestIds();
@@ -513,13 +518,15 @@ function renderQueue(state) {
     if (myIds.has(item.id)) {
       const chip = document.createElement("span");
       chip.className = "q-you";
-      chip.textContent = "你";
+      chip.textContent = t("你");
       li.querySelector(".t-row").appendChild(chip);
     }
     ul.appendChild(li);
   });
 }
 
-renderSingers();
-selectGenre("All"); // renders tabs + loads real songs on open
-connectWs();
+if (document.body.dataset.admin !== "true") {
+  renderSingers();
+  selectGenre("All"); // country charts + songs on first load
+  connectWs();
+}

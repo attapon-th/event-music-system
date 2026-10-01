@@ -20,6 +20,8 @@ services:
       - .env
     environment:
       PORT: ${PORT:-45416}
+      DEFAULT_REGION: ${DEFAULT_REGION:-TH}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-th-TH}
       # Public address the QR code points guests to (your reverse-proxy domain).
       PUBLIC_URL: ${PUBLIC_URL:-}
 
