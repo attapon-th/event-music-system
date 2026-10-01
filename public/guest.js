@@ -4,9 +4,42 @@ const resultsEl = document.getElementById("results");
 const statusEl = document.getElementById("status");
 const toastsEl = document.getElementById("toasts");
 const qEl = document.getElementById("q");
-const nameEl = document.getElementById("name");
 const sugSection = document.getElementById("suggestions-section");
 const backToExploreBtn = document.getElementById("back-to-explore");
+
+// Shared tabs keep both panels mounted so search and live queue survive switching.
+const pageTabs = [document.getElementById("search-tab"), document.getElementById("queue-tab")];
+function selectPageTab(index) {
+  pageTabs.forEach((tab, i) => {
+    tab.setAttribute("aria-selected", String(i === index));
+    tab.tabIndex = i === index ? 0 : -1;
+    document.getElementById(i === 0 ? "search-panel" : "queue-panel").hidden = i !== index;
+  });
+}
+pageTabs.forEach((tab, index) => {
+  tab.onclick = () => selectPageTab(index);
+  tab.onkeydown = (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? 1 : 1 - index;
+    selectPageTab(next);
+    pageTabs[next].focus();
+  };
+});
+
+let searchMode = "videos";
+const searchModes = ["videos", "karaoke", "songs"];
+function selectSearchMode(mode) {
+  if (mode === searchMode) return;
+  searchMode = mode;
+  searchModes.forEach((value) => {
+    document.getElementById(`mode-${value}`).setAttribute("aria-pressed", String(value === mode));
+  });
+  return qEl.value.trim() ? doSearch(qEl.value.trim()) : backToExplore();
+}
+searchModes.forEach((mode) => {
+  document.getElementById(`mode-${mode}`).onclick = () => selectSearchMode(mode);
+});
 
 // ---- Explore (KTV-style browse) ----------------------------------------
 // Genre tabs and singer chips run canned YouTube queries via /api/browse
@@ -24,15 +57,15 @@ const GENRE_QUERIES = {
   Graduation: ["เพลงปัจฉิม", "เพลงมิตรภาพ", "graduation songs"],
   Thai: [`เพลงไทย ${THIS_YEAR}`, "T-pop", "เพลงไทยยอดนิยม"],
   "K-pop": [`K-pop ${THIS_YEAR}`, "K-pop dance hits", "K-pop girl group hits"],
-  Cantopop: [`廣東歌 ${THIS_YEAR}`, "香港歌手 新歌", "廣東歌 熱門"],
-  Mandopop: ["華語 新歌", `華語流行 ${THIS_YEAR}`, "國語 經典"],
+  Cantopop: [`Cantopop ${THIS_YEAR}`, "Hong Kong new songs", "Cantopop hits"],
+  Mandopop: ["Mandopop new songs", `Mandopop ${THIS_YEAR}`, "Mandarin classics"],
   Western: ["top pop hits", `pop hits ${THIS_YEAR}`, "classic pop anthems"],
   Party: ["party dance hits", "EDM anthems", "dancefloor classics"],
-  Classics: ["Beyond 經典", "張國榮", "陳慧嫻", "廣東歌 90年代"],
+  Classics: ["Beyond classics", "Leslie Cheung", "Priscilla Chan", "Cantopop 90s"],
 };
-// Display: Chinese label + inline icon per genre (keys stay English — they
+// Display: Thai label + inline icon per genre (keys stay English — they
 // index GENRE_QUERIES and the singer-filter slugs).
-const GENRE_LABEL = { Thai: t("เพลงไทย"), All: t("全部"), Graduation: t("畢業歌"), "K-pop": "K-pop", Cantopop: t("廣東歌"), Mandopop: t("國語歌"), Western: t("歐美"), Party: t("派對"), Classics: t("經典") };
+const GENRE_LABEL = { Thai: t("Thai"), All: t("All"), Graduation: t("Graduation songs"), "K-pop": "K-pop", Cantopop: t("Cantopop"), Mandopop: t("Mandopop"), Western: t("Western"), Party: t("Party"), Classics: t("Classics") };
 const GENRE_ICON = { Thai: "♫",
   All: '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="2.6"/><circle cx="17" cy="7" r="2.6"/><circle cx="7" cy="17" r="2.6"/><circle cx="17" cy="17" r="2.6"/></svg>',
   Graduation: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 9.5L12 5l9.5 4.5L12 14z"/><path d="M6.5 11.8v4.2c0 1.1 2.5 2.5 5.5 2.5s5.5-1.4 5.5-2.5v-4.2"/><path d="M21.5 9.5v5"/></svg>',
@@ -47,38 +80,38 @@ const GENRE_SLUG = { Thai: "thai", "K-pop": "kpop", Cantopop: "canto", Mandopop:
 
 const SINGERS = [
   ...["BOWKYLION", "นนท์ ธนนท์", "Tilly Birds", "Three Man Down", "Jeff Satur", "โจอี้ ภูวศิษฐ์", "Bodyslam", "LISA"].map((n) => ({ n, q: n, g: "thai" })),
-  { n: "陳奕迅", q: "陳奕迅 Eason Chan", g: "canto" },
-  { n: "林家謙", q: "林家謙 Terence Lam", g: "canto" },
-  { n: "姜濤", q: "姜濤 Keung To", g: "canto" },
-  { n: "MC 張天賦", q: "MC 張天賦", g: "canto" },
-  { n: "張敬軒", q: "張敬軒 Hins Cheung", g: "canto" },
+  { n: "Eason Chan", q: "Eason Chan", g: "canto" },
+  { n: "Terence Lam", q: "Terence Lam", g: "canto" },
+  { n: "Keung To", q: "Keung To", g: "canto" },
+  { n: "MC Cheung", q: "MC Cheung", g: "canto" },
+  { n: "Hins Cheung", q: "Hins Cheung", g: "canto" },
   { n: "COLLAR", q: "COLLAR", g: "canto" },
-  { n: "衛蘭", q: "衛蘭 Janice Vidal", g: "canto" },
-  { n: "鄭欣宜", q: "鄭欣宜 Joyce Cheng", g: "canto" },
-  { n: "Gin Lee", q: "Gin Lee 李幸倪", g: "canto" },
-  { n: "Dear Jane", q: "Dear Jane 樂隊", g: "canto" },
-  { n: "洪嘉豪", q: "洪嘉豪 Kaho Hung", g: "canto" },
-  { n: "曾比特", q: "曾比特 Mike Tsang", g: "canto" },
-  { n: "MIRROR", q: "MIRROR 香港", g: "canto" },
-  { n: "呂爵安", q: "呂爵安 Edan", g: "canto" },
-  { n: "陳蕾", q: "陳蕾 Panther Chan", g: "canto" },
-  { n: "AGA", q: "AGA 江海迦", g: "canto" },
-  { n: "林奕匡", q: "林奕匡 Phil Lam", g: "canto" },
+  { n: "Janice Vidal", q: "Janice Vidal", g: "canto" },
+  { n: "Joyce Cheng", q: "Joyce Cheng", g: "canto" },
+  { n: "Gin Lee", q: "Gin Lee", g: "canto" },
+  { n: "Dear Jane", q: "Dear Jane", g: "canto" },
+  { n: "Kaho Hung", q: "Kaho Hung", g: "canto" },
+  { n: "Mike Tsang", q: "Mike Tsang", g: "canto" },
+  { n: "MIRROR", q: "MIRROR Hong Kong", g: "canto" },
+  { n: "Edan", q: "Edan", g: "canto" },
+  { n: "Panther Chan", q: "Panther Chan", g: "canto" },
+  { n: "AGA", q: "AGA", g: "canto" },
+  { n: "Phil Lam", q: "Phil Lam", g: "canto" },
   { n: "Serrini", q: "Serrini", g: "canto" },
-  { n: "周杰倫", q: "周杰倫 Jay Chou", g: "mando" },
-  { n: "G.E.M.", q: "鄧紫棋 G.E.M.", g: "mando" },
-  { n: "林俊傑", q: "林俊傑 JJ Lin", g: "mando" },
-  { n: "五月天", q: "五月天 Mayday", g: "mando" },
-  { n: "蔡依林", q: "蔡依林 Jolin Tsai", g: "mando" },
-  { n: "田馥甄", q: "田馥甄 Hebe Tien", g: "mando" },
-  { n: "周興哲", q: "周興哲 Eric Chou", g: "mando" },
-  { n: "告五人", q: "告五人 Accusefive", g: "mando" },
-  { n: "林宥嘉", q: "林宥嘉 Yoga Lin", g: "mando" },
-  { n: "徐佳瑩", q: "徐佳瑩 LaLa Hsu", g: "mando" },
-  { n: "蘇打綠", q: "蘇打綠 Sodagreen", g: "mando" },
-  { n: "楊丞琳", q: "楊丞琳 Rainie Yang", g: "mando" },
-  { n: "薛之謙", q: "薛之謙 Joker Xue", g: "mando" },
-  { n: "王心凌", q: "王心凌 Cyndi Wang", g: "mando" },
+  { n: "Jay Chou", q: "Jay Chou", g: "mando" },
+  { n: "G.E.M.", q: "G.E.M.", g: "mando" },
+  { n: "JJ Lin", q: "JJ Lin", g: "mando" },
+  { n: "Mayday", q: "Mayday", g: "mando" },
+  { n: "Jolin Tsai", q: "Jolin Tsai", g: "mando" },
+  { n: "Hebe Tien", q: "Hebe Tien", g: "mando" },
+  { n: "Eric Chou", q: "Eric Chou", g: "mando" },
+  { n: "Accusefive", q: "Accusefive", g: "mando" },
+  { n: "Yoga Lin", q: "Yoga Lin", g: "mando" },
+  { n: "LaLa Hsu", q: "LaLa Hsu", g: "mando" },
+  { n: "Sodagreen", q: "Sodagreen", g: "mando" },
+  { n: "Rainie Yang", q: "Rainie Yang", g: "mando" },
+  { n: "Joker Xue", q: "Joker Xue", g: "mando" },
+  { n: "Cyndi Wang", q: "Cyndi Wang", g: "mando" },
   { n: "NewJeans", q: "NewJeans", g: "kpop" },
   { n: "BTS", q: "BTS", g: "kpop" },
   { n: "BLACKPINK", q: "BLACKPINK", g: "kpop" },
@@ -120,22 +153,22 @@ const SINGERS = [
   { n: "Pitbull", q: "Pitbull", g: "party" },
   { n: "Zedd", q: "Zedd", g: "party" },
   { n: "Beyond", q: "Beyond", g: "classics" },
-  { n: "張國榮", q: "張國榮 Leslie Cheung", g: "classics" },
-  { n: "陳慧嫻", q: "陳慧嫻 Priscilla Chan", g: "classics" },
-  { n: "譚詠麟", q: "譚詠麟 Alan Tam", g: "classics" },
-  { n: "梅艷芳", q: "梅艷芳 Anita Mui", g: "classics" },
-  { n: "張學友", q: "張學友 Jacky Cheung", g: "classics" },
-  { n: "王菲", q: "王菲 Faye Wong", g: "classics" },
-  { n: "鄧麗君", q: "鄧麗君 Teresa Teng", g: "classics" },
-  { n: "劉德華", q: "劉德華 Andy Lau", g: "classics" },
-  { n: "林憶蓮", q: "林憶蓮 Sandy Lam", g: "classics" },
-  { n: "葉蒨文", q: "葉蒨文 Sally Yeh", g: "classics" },
+  { n: "Leslie Cheung", q: "Leslie Cheung", g: "classics" },
+  { n: "Priscilla Chan", q: "Priscilla Chan", g: "classics" },
+  { n: "Alan Tam", q: "Alan Tam", g: "classics" },
+  { n: "Anita Mui", q: "Anita Mui", g: "classics" },
+  { n: "Jacky Cheung", q: "Jacky Cheung", g: "classics" },
+  { n: "Faye Wong", q: "Faye Wong", g: "classics" },
+  { n: "Teresa Teng", q: "Teresa Teng", g: "classics" },
+  { n: "Andy Lau", q: "Andy Lau", g: "classics" },
+  { n: "Sandy Lam", q: "Sandy Lam", g: "classics" },
+  { n: "Sally Yeh", q: "Sally Yeh", g: "classics" },
 ];
 
 const moreBtn = document.getElementById("more");
 let activeGenre = "All"; // which tab is selected — also filters the singer row
 let activeKey = "genre:All"; // "genre:<name>" or "singer:<name>" (highlight)
-const browse = { queries: [], idx: 0, seen: new Set(), gen: 0 };
+const browse = { queries: [], idx: 0, seen: new Set(), pending: [], gen: 0 };
 
 // Fisher-Yates — used both for the query-variant reorder (shuffle button) and
 // to shuffle fetched results client-side, since the server cache returns the
@@ -200,6 +233,7 @@ async function startBrowse(queries) {
   browse.queries = queries;
   browse.idx = 0;
   browse.seen = new Set();
+  browse.pending = [];
   browse.gen++; // invalidate any in-flight loadMoreSongs from the previous tab/search
   resultsEl.innerHTML = "";
   moreBtn.classList.add("hidden");
@@ -212,32 +246,32 @@ async function startBrowse(queries) {
 async function loadMoreSongs() {
   const gen = browse.gen;
   moreBtn.disabled = true;
-  setStatus(t("載入歌曲中… Loading songs…"));
+  setStatus(t("Loading songs…"));
   try {
-    while (browse.idx < browse.queries.length) {
+    while (browse.pending.length === 0 && browse.idx < browse.queries.length) {
       const q = browse.queries[browse.idx++];
-      const res = await fetch("/api/browse?q=" + encodeURIComponent(q));
+      const res = await fetch("/api/browse?q=" + encodeURIComponent(q) + "&mode=" + searchMode);
       if (browse.gen !== gen) return; // stale — a newer tab/search/shuffle took over
       const data = await res.json();
       if (browse.gen !== gen) return;
       if (!res.ok) throw new Error(data.error || t("Couldn't load songs."));
-      let fresh = (data.results || []).filter((r) => r.videoId && !browse.seen.has(r.videoId));
+      const fresh = (data.results || []).filter((r) => r.videoId && !browse.seen.has(r.videoId));
       if (fresh.length === 0) continue; // this variant was all dupes — try the next one
       for (const r of fresh) browse.seen.add(r.videoId);
-      fresh = shuffleArray(fresh); // don't show the same order every time (A4)
-      setStatus("");
-      appendResults(fresh);
+      browse.pending = shuffleArray(fresh); // don't show the same order every time (A4)
       break;
     }
-    if (browse.gen === gen && browse.seen.size === 0) {
-      setStatus(t("沒有找到歌曲 — 試試其他分類。No songs found — try another tab."));
+    setStatus("");
+    showMoreResults();
+    if (browse.seen.size === 0 && resultsEl.children.length === 0) {
+      setStatus(t("No songs found — try another tab."));
     }
   } catch (err) {
     if (browse.gen === gen) setStatus("😕 " + err.message);
   } finally {
     if (browse.gen === gen) {
       moreBtn.disabled = false;
-      moreBtn.classList.toggle("hidden", browse.idx >= browse.queries.length);
+      moreBtn.classList.toggle("hidden", browse.pending.length === 0 && browse.idx >= browse.queries.length);
     }
   }
 }
@@ -259,32 +293,39 @@ async function doSearch(q) {
   if (!q) return backToExplore(); // empty submit restores explore
 
   qEl.blur();
+  const gen = ++browse.gen;
+  browse.idx = browse.queries.length;
+  browse.pending = [];
   resultsEl.innerHTML = "";
   sugSection.classList.add("hidden"); // hide explore once searching
   moreBtn.classList.add("hidden");
-  if (document.body.dataset.admin !== "true") backToExploreBtn.classList.remove("hidden");
-  setStatus(t("搜尋中… Searching…"));
+  backToExploreBtn.classList.remove("hidden");
+  setStatus(t("Searching…"));
   try {
-    const res = await fetch("/api/search?q=" + encodeURIComponent(q));
+    const res = await fetch("/api/search?q=" + encodeURIComponent(q) + "&mode=" + searchMode);
     const data = await res.json();
+    if (browse.gen !== gen) return;
     if (!res.ok) throw new Error(data.error || t("Search failed"));
     renderResults(data.results || []);
   } catch (err) {
-    setStatus("😕 " + err.message);
+    if (browse.gen === gen) setStatus("😕 " + err.message);
+  } finally {
+    if (browse.gen === gen) moreBtn.disabled = false;
   }
 }
 
 // Restore the explore section after a search — re-runs whatever browse
 // selection (genre/singer) was active before the guest searched.
 function backToExplore() {
+  browse.gen++;
+  browse.pending = [];
+  moreBtn.classList.add("hidden");
   qEl.value = "";
   resultsEl.innerHTML = "";
   setStatus("");
   backToExploreBtn.classList.add("hidden");
-  if (document.body.dataset.admin !== "true") {
-    sugSection.classList.remove("hidden");
-    startBrowse(browse.queries);
-  }
+  sugSection.classList.remove("hidden");
+  return startBrowse(browse.queries);
 }
 
 backToExploreBtn.onclick = backToExplore;
@@ -319,11 +360,17 @@ function appendResults(results) {
   for (const r of results) resultsEl.appendChild(resultCard(r));
 }
 
+function showMoreResults() {
+  appendResults(browse.pending.splice(0, 5));
+  moreBtn.classList.toggle("hidden", browse.pending.length === 0 && browse.idx >= browse.queries.length);
+}
+
 function renderResults(results) {
-  if (results.length === 0) return setStatus(t("沒有結果，試試其他關鍵字。No results — try a different search."));
+  if (results.length === 0) return setStatus(t("No results — try a different search."));
   setStatus("");
   resultsEl.innerHTML = "";
-  appendResults(results);
+  browse.pending = results.slice();
+  showMoreResults();
 }
 
 // ---- Guest identity -----------------------------------------------------
@@ -337,11 +384,25 @@ const clientId =
     return id;
   })();
 
-// ---- Guest name (persisted, optional) ----------------------------------
-nameEl.value = localStorage.getItem("guestName") || "";
-nameEl.addEventListener("change", () => {
-  localStorage.setItem("guestName", nameEl.value.trim());
-});
+// Shared nickname on Guest/Admin, kept across refreshes on this browser.
+const NICKNAMES = [
+  "กุ้ง", "ก้อง", "แก้ม", "กิ๊ฟ", "เก่ง", "ไก่", "ข้าว", "ขวัญ", "ไข่มุก", "เข็ม",
+  "ครีม", "เค้ก", "คิม", "คิว", "แคท", "จอย", "จูน", "จ๋า", "เจี๊ยบ", "แจน",
+  "ชมพู่", "ชะเอม", "เชอร์รี่", "โซ่", "ดิว", "ดาว", "โดนัท", "ตาล", "ต้น", "เต้",
+  "แตงโม", "ตุ๊ก", "เตย", "ตูน", "ถั่ว", "ท็อป", "ทิว", "เทียน", "นัท", "น้ำ",
+  "นุ่น", "นิว", "นิ่ม", "น้อย", "เนย", "บี", "บัว", "บอย", "บาส", "เบล",
+  "ใบเตย", "โบว์", "ปอ", "ป่าน", "ปาล์ม", "ปุ้ย", "ปลา", "เป้", "แป้ง", "ปิง",
+  "ฝน", "ฝ้าย", "ฟ้า", "เฟิร์น", "ฟาง", "ฟิล์ม", "พิม", "แพร", "พลอย", "พีช",
+  "พัด", "เพชร", "เพลง", "ภู", "มายด์", "มิ้นท์", "มุก", "เมย์", "มด", "หมิว",
+  "โม", "แยม", "ยุ้ย", "ยู", "ริบบิ้น", "รุ้ง", "โรส", "ลิลลี่", "ลูกแก้ว", "เล็ก",
+  "ว่าน", "วิว", "ส้ม", "ทราย", "ออม", "อาย", "อิง", "เอม", "โอ๊ต", "ไอซ์",
+];
+const savedNickname = localStorage.getItem("guestNickname");
+const nickname = NICKNAMES.includes(savedNickname)
+  ? savedNickname : NICKNAMES[Math.floor(Math.random() * NICKNAMES.length)];
+localStorage.setItem("guestNickname", nickname);
+document.getElementById("request-title").textContent = t("addSongBy", { nickname });
+document.title = t("addSongBy", { nickname });
 
 // ---- Own requests (for the "YOU" badge in the queue) -------------------
 function loadMyRequestIds() {
@@ -363,16 +424,16 @@ async function requestSong(song, btn) {
   // Persistent, animated "checking" card — with the web-searching filter a
   // verdict can take 5–20s, so it must read as activity, not a frozen toast.
   // Subline names the song: several checks can be in flight at once.
-  const notice = toast("info", "🔎", t("檢查歌曲中…"), { persist: true, sub: song.title, checking: true });
+  const notice = toast("info", "🔎", t("Checking song…"), { persist: true, sub: song.title, checking: true });
   try {
     const res = await fetch("/api/request", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...song, name: nameEl.value.trim(), clientId }),
+      body: JSON.stringify({ ...song, name: nickname, clientId }),
     });
     const data = await res.json();
     if (data.ok) {
-      const main = data.position === 0 ? t("已加入 · 現正播放") : t("position", { position: data.position });
+      const main = data.position === 0 ? t("Added — now playing") : t("position", { position: data.position });
       const sub = data.position === 0 ? t("Added — playing now!") : t("position", { position: data.position });
       notice.set("ok", "✓", main, { sub });
       btn.textContent = "✓";
@@ -394,13 +455,13 @@ async function requestSong(song, btn) {
       btn.textContent = "+";
     }
   } catch (err) {
-    notice.set("bad", "⚠️", t("網絡錯誤，請再試。"), { sub: t("Network error. Try again.") });
+    notice.set("bad", "⚠️", t("Network error. Please try again."), { sub: t("Network error. Try again.") });
     btn.disabled = false;
     btn.textContent = "+";
   }
 }
 
-// Stacking toasts: each card is its own element (icon circle + Chinese main
+// Stacking toasts: each card is its own element (icon circle + Thai main
 // line + smaller English subline). toast() returns a handle whose set() morphs
 // the card in place — a request's "checking…" card becomes its own verdict —
 // so parallel requests never clobber each other's feedback.
@@ -461,7 +522,7 @@ function cooldownToast(seconds) {
 }
 
 // ---- Live queue (WebSocket) ------------------------------------------
-let lastQueueState = null; // kept so the 你 badge can re-render after an add
+let lastQueueState = null; // kept so the You badge can re-render after an add
 
 function connectWs() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -503,7 +564,7 @@ function renderQueue(state) {
   const ul = document.getElementById("queue");
   ul.innerHTML = "";
   if (queue.length === 0) {
-    ul.innerHTML = `<li class="q-empty">${t("暫時未有歌曲 — 快啲點歌啦！Nothing queued yet — be the first!")}</li>`;
+    ul.innerHTML = `<li class="q-empty">${t("Nothing queued yet — be the first!")}</li>`;
     return;
   }
   const myIds = loadMyRequestIds();
@@ -518,15 +579,13 @@ function renderQueue(state) {
     if (myIds.has(item.id)) {
       const chip = document.createElement("span");
       chip.className = "q-you";
-      chip.textContent = t("你");
+      chip.textContent = t("You");
       li.querySelector(".t-row").appendChild(chip);
     }
     ul.appendChild(li);
   });
 }
 
-if (document.body.dataset.admin !== "true") {
-  renderSingers();
-  selectGenre("All"); // country charts + songs on first load
-  connectWs();
-}
+renderSingers();
+selectGenre("All"); // country charts + songs on first load for Guest and Admin
+if (document.body.dataset.admin !== "true") connectWs();

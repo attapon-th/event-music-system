@@ -1,7 +1,7 @@
 // YouTube access without an API key:
 //  - searchYouTube(): queries YouTube Music's internal search API (InnerTube,
 //    the same JSON endpoint the music.youtube.com web app calls), filtered to
-//    the "Songs" category. Music-only results with real artist/album metadata;
+//    the "Songs" category, or regular YouTube videos for karaoke/music videos;
 //    the returned videoIds play in the regular YouTube iframe as usual.
 //  - checkPlayable(): uses the oEmbed endpoint to reject deleted/private videos
 //    before they reach the queue. (Embed-disabled videos still return 200 here,
@@ -29,32 +29,57 @@ function pickThumbnail(thumbs) {
 // InnerTube search filter for the "Songs" category (same value ytmusicapi uses).
 const SONGS_FILTER = "EgWKAQIIAWoMEA4QChADEAQQCRAF";
 
-export async function searchYouTube(query, { limit = 12, timeoutMs = 8000, region = "TH", locale = "th-TH" } = {}) {
+export async function searchYouTube(query, { limit = 12, timeoutMs = 8000, region = "TH", locale = "th-TH", mode = "songs" } = {}) {
+  const karaoke = mode === "karaoke";
+  const videos = mode !== "songs";
+  if (karaoke && !/karaoke|คาราโอเกะ/i.test(query)) query += " karaoke";
+  if (mode === "videos" && !/music video|official mv|m\/v|วิดีโอเพลง/i.test(query)) query += " official music video";
+  const origin = videos ? "https://www.youtube.com" : "https://music.youtube.com";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let data;
   try {
-    const res = await fetch("https://music.youtube.com/youtubei/v1/search?prettyPrint=false", {
+    const res = await fetch(origin + "/youtubei/v1/search?prettyPrint=false", {
       method: "POST",
       headers: {
         ...COMMON_HEADERS,
         "Content-Type": "application/json",
-        Origin: "https://music.youtube.com",
-        Referer: "https://music.youtube.com/",
+        Origin: origin,
+        Referer: origin + "/",
       },
       body: JSON.stringify({
         context: {
-          client: { clientName: "WEB_REMIX", clientVersion: "1.20250101.01.00", hl: locale.split("-")[0], gl: region },
+          client: { clientName: videos ? "WEB" : "WEB_REMIX", clientVersion: videos ? "2.20250101.00.00" : "1.20250101.01.00", hl: locale.split("-")[0], gl: region },
         },
         query,
-        params: SONGS_FILTER,
+        params: videos ? "EgIQAQ%3D%3D" : SONGS_FILTER,
       }),
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`YouTube Music responded ${res.status}`);
+    if (!res.ok) throw new Error(`YouTube search responded ${res.status}`);
     data = await res.json();
   } finally {
     clearTimeout(timer);
+  }
+
+  if (videos) {
+    const results = [];
+    const sections = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+    for (const section of sections) {
+      for (const item of section.itemSectionRenderer?.contents || []) {
+        const r = item.videoRenderer;
+        if (!r?.videoId || !r.lengthText) continue; // exclude live streams
+        results.push({
+          videoId: r.videoId,
+          title: r.title?.runs?.map((run) => run.text).join("") || r.title?.simpleText || "(untitled)",
+          channel: (r.ownerText || r.shortBylineText)?.runs?.map((run) => run.text).join("") || "Unknown",
+          duration: r.lengthText.simpleText || r.lengthText.runs?.map((run) => run.text).join("") || "",
+          thumbnail: pickThumbnail(r.thumbnail?.thumbnails),
+        });
+        if (results.length >= limit) return results;
+      }
+    }
+    return results;
   }
 
   const sections =

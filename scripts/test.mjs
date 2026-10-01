@@ -1,4 +1,6 @@
 // No external services or test framework: real HTTP/WS against a temporary copy.
+import "./test-guest.mjs";
+import "./test-host.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, cpSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,11 +28,26 @@ globalThis.fetch = async (url, options) => {
     await new Promise(resolve => setTimeout(resolve, 15));
     return new Response('{}');
   }
-  if (!String(url).includes('music.youtube.com/youtubei')) return realFetch(url, options);
+  if (!String(url).includes('youtube.com/youtubei')) return realFetch(url, options);
   const body = JSON.parse(options.body);
   assert.equal(body.context.client.gl, process.env.DEFAULT_REGION || 'TH');
   assert.equal(body.context.client.hl, (process.env.DEFAULT_LOCALE || 'th-TH').split('-')[0]);
+  if (String(url).includes('www.youtube.com/youtubei')) {
+    assert.equal(body.context.client.clientName, 'WEB');
+    assert.equal(body.params, 'EgIQAQ%3D%3D');
+    assert.match(body.query, /karaoke|คาราโอเกะ|music video|official mv|วิดีโอเพลง/i);
+    const karaoke = /karaoke|คาราโอเกะ/i.test(body.query);
+    const video = (id, duration) => ({ videoRenderer: {
+      videoId: id, title: { runs: [{text: body.query}] }, ownerText: {runs:[{text:karaoke ? 'Karaoke channel' : 'Official artist'}]},
+      ...(duration ? {lengthText: {simpleText: duration}} : {}), thumbnail: {thumbnails:[{url:'https://example.com/thumb.jpg'}]}
+    }});
+    return Response.json({contents:{twoColumnSearchResultsRenderer:{primaryContents:{sectionListRenderer:{contents:[
+      {itemSectionRenderer:{contents:[{channelRenderer:{}}, video('live0000001'), video(karaoke ? 'karaoke0001' : 'mv000000001','3:30'), video(karaoke ? 'karaoke0002' : 'mv000000002','1:20:00')]}}
+    ]}}}}});
+  }
   if (body.query) {
+    assert.equal(body.context.client.clientName, 'WEB_REMIX');
+    assert.equal(body.params, 'EgWKAQIIAWoMEA4QChADEAQQCRAF');
     const r = row('song0000001', body.query);
     r.musicResponsiveListItemRenderer.flexColumns[1].musicResponsiveListItemFlexColumnRenderer.text.runs.push({text:'3:20'});
     return Response.json({ contents: { tabbedSearchResultsRenderer: { tabs: [{ tabRenderer: { content: { sectionListRenderer: { contents: [{ musicShelfRenderer: { contents: [r] } }] } } } }] } } });
@@ -114,6 +131,29 @@ try {
   assert.equal(info.defaultLocale, "th-TH");
   assert.equal((await (await fetch(base + "/api/search?q=Bruno%20Mars")).json()).results[0].title, "Bruno Mars");
   assert.equal((await (await fetch(base + "/api/browse?q=__hits")).json()).results[0].title, "Thailand chart");
+  const karaoke = (await (await fetch(base + "/api/search?q=Bruno%20Mars&mode=karaoke")).json()).results;
+  assert.equal(karaoke.length, 2, "karaoke excludes live streams and non-video results");
+  assert.equal(karaoke[0].title, "Bruno Mars karaoke");
+  assert.equal(karaoke[0].channel, "Karaoke channel");
+  assert.equal(karaoke[0].duration, "3:30");
+  assert.equal((await (await fetch(base + "/api/search?q=test%20karaoke&mode=karaoke")).json()).results[0].title, "test karaoke");
+  assert.equal((await (await fetch(base + "/api/search?q=เพลง%20คาราโอเกะ&mode=karaoke")).json()).results[0].title, "เพลง คาราโอเกะ");
+  for (const endpoint of ["search", "browse"]) {
+    assert.equal((await fetch(base + `/api/${endpoint}?q=test&mode=invalid`)).status, 400);
+    assert.equal((await fetch(base + `/api/${endpoint}?q=test&mode[]=karaoke`)).status, 400);
+  }
+  const karaokeBrowse = (await (await fetch(base + "/api/browse?q=__hits&mode=karaoke")).json()).results;
+  assert.equal(karaokeBrowse.length, 1, "browse excludes compilations");
+  assert.equal(karaokeBrowse[0].title, "เพลงไทยยอดนิยม karaoke");
+  assert.equal((await (await fetch(base + "/api/browse?q=__hits")).json()).results[0].title, "Thailand chart", "mode caches stay separate");
+  const videos = (await (await fetch(base + "/api/search?q=Bruno%20Mars&mode=videos")).json()).results;
+  assert.equal(videos.length, 2);
+  assert.equal(videos[0].title, "Bruno Mars official music video");
+  assert.equal(videos[0].channel, "Official artist");
+  assert.equal((await (await fetch(base + "/api/search?q=test%20official%20music%20video&mode=videos")).json()).results[0].title, "test official music video");
+  assert.equal((await (await fetch(base + "/api/browse?q=Bruno%20Mars&mode=videos")).json()).results.length, 1);
+  assert.equal((await (await fetch(base + "/api/browse?q=Bruno%20Mars&mode=songs")).json()).results[0].title, "Bruno Mars", "music-video cache stays separate from audio search");
+  assert.equal((await (await fetch(base + "/api/browse?q=__hits&mode=videos")).json()).results[0].title, "Thailand chart");
   const token = (await (await fetch(base + "/api/host-token", { headers })).json()).token;
   const guest = await socket();
   const admin = await socket(token);
@@ -165,6 +205,10 @@ try {
   await sync((s) => s.queue.length === 0 && s.nowPlaying.id === ids[0]);
   const concurrent = await Promise.all([request("song0000006", "a"), request("song0000006", "b")]);
   assert.equal(concurrent.filter((result) => result.ok).length, 1);
+  assert.equal((await request(karaoke[0].videoId)).ok, true, "karaoke uses the existing request pipeline");
+  await sync((s) => s.queue.some((item) => item.videoId === karaoke[0].videoId));
+  assert.equal((await request(videos[0].videoId)).ok, true, "music videos use the existing request pipeline");
+  await sync((s) => s.queue.some((item) => item.videoId === videos[0].videoId));
   const bad = await fetch(base + "/api/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ videoId: {}, title: "bad", clientId: { toString: 1 } }) });
   assert.equal(bad.status, 400);
   for (const ws of sockets) ws.terminate();

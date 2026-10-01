@@ -143,16 +143,21 @@ function durationSeconds(d) {
 app.get("/api/browse", async (req, res) => {
   const q = (req.query.q || "").toString().trim().slice(0, 100);
   if (!q) return res.json({ results: [] });
-  const hit = browseCache.get(q);
+  const mode = req.query.mode || "songs";
+  if (!["songs", "karaoke", "videos"].includes(mode)) return res.status(400).json({ error: "โหมดค้นหาไม่ถูกต้อง" });
+  const cacheKey = `${mode}:${q}`;
+  const hit = browseCache.get(cacheKey);
   if (hit && Date.now() - hit.at < BROWSE_TTL_MS) return res.json({ results: hit.results });
   try {
-    // Keep the old sentinel working; both use the configured country chart.
-    const fetched =
-      ["__hits", "__hk_hits"].includes(q) ? await fetchChartHits({ ...youtubeOptions, limit: 40 }) : await searchYouTube(q, { ...youtubeOptions, limit: 40 });
+    // Chart sentinels use popular-song search in karaoke mode.
+    const isChart = ["__hits", "__hk_hits"].includes(q);
+    const fetched = mode !== "karaoke" && isChart
+      ? await fetchChartHits({ ...youtubeOptions, limit: 40 })
+      : await searchYouTube(isChart ? "เพลงไทยยอดนิยม" : q, { ...youtubeOptions, limit: 40, mode });
     const results = fetched
       .filter((r) => durationSeconds(r.duration) <= MAX_SINGLE_SECONDS)
       .slice(0, 20);
-    browseCache.set(q, { at: Date.now(), results });
+    browseCache.set(cacheKey, { at: Date.now(), results });
     if (browseCache.size > 200) browseCache.delete(browseCache.keys().next().value);
     res.json({ results });
   } catch (err) {
@@ -181,7 +186,9 @@ app.get("/api/search", async (req, res) => {
   const q = (req.query.q || "").toString().trim();
   if (!q) return res.json({ results: [] });
   try {
-    const results = await searchYouTube(q, youtubeOptions);
+    const mode = req.query.mode || "songs";
+    if (!["songs", "karaoke", "videos"].includes(mode)) return res.status(400).json({ error: "โหมดค้นหาไม่ถูกต้อง" });
+    const results = await searchYouTube(q, { ...youtubeOptions, mode });
     res.json({ results });
   } catch (err) {
     console.error("[search]", err.message);

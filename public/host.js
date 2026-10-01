@@ -68,6 +68,8 @@ window.onYouTubeIframeAPIReady = function () {
     events: {
       onReady: () => {
         playerReady = true;
+        // Keep D-pad navigation in our controls rather than the cross-origin iframe.
+        player.getIframe().setAttribute("tabindex", "-1");
         syncPlayer();
       },
       onStateChange: (e) => {
@@ -162,6 +164,7 @@ window.addEventListener("pageshow", (e) => {
   currentVideoId = null;
   document.getElementById("start-overlay").classList.remove("hidden");
   document.getElementById("stage").classList.add("hidden");
+  document.getElementById("start-btn").focus();
 });
 
 // ---- Rendering --------------------------------------------------------
@@ -176,9 +179,11 @@ function render() {
   const queue = latestState.queue || [];
   document.getElementById("queue-count").textContent = queue.length;
   const ul = document.getElementById("queue");
+  const focusedId = document.activeElement?.dataset.queueId;
   ul.innerHTML = "";
   if (queue.length === 0) {
     ul.innerHTML = `<li class="q-empty">${t("Queue is empty — scan the QR to add a song.")}</li>`;
+    if (focusedId) document.getElementById("skip").focus();
     return;
   }
   for (const item of queue) {
@@ -195,8 +200,14 @@ function render() {
       <button class="q-remove" title="${t("Remove")}">✕</button>`;
     li.querySelector(".q-title").textContent = item.title;
     li.querySelector(".q-sub").textContent = item.addedBy ? t("requester", { name: item.addedBy }) : item.channel;
-    li.querySelector(".q-remove").onclick = () => send({ type: "remove", id: item.id });
+    const remove = li.querySelector(".q-remove");
+    remove.dataset.queueId = item.id;
+    remove.onclick = () => send({ type: "remove", id: item.id });
     ul.appendChild(li);
+  }
+  if (focusedId) {
+    const buttons = [...ul.querySelectorAll("button")];
+    (buttons.find((button) => button.dataset.queueId === focusedId) || document.getElementById("skip")).focus();
   }
 }
 
@@ -208,7 +219,7 @@ const CLOCK_SVG =
 function renderFilter() {
   const btn = document.getElementById("filter-toggle");
   const strict = filterOn && moderationMode === "strict";
-  const label = !filterOn ? t("關") : strict ? t("嚴格") : t("開");
+  const label = !filterOn ? t("Off") : strict ? t("Strict") : t("On");
   btn.innerHTML = `${SHIELD_SVG}<span>${t("filter", { label })}</span>`;
   btn.classList.toggle("on", filterOn && !strict);
   btn.classList.toggle("strict", strict);
@@ -218,7 +229,7 @@ function renderFilter() {
 
 function renderCooldown() {
   const btn = document.getElementById("cooldown-toggle");
-  btn.innerHTML = `${CLOCK_SVG}<span>${t("cooldown", { seconds: cooldownSeconds || t("關") })}</span>`;
+  btn.innerHTML = `${CLOCK_SVG}<span>${t("cooldown", { seconds: cooldownSeconds || t("Off") })}</span>`;
   btn.classList.toggle("on", cooldownSeconds > 0);
 }
 
@@ -240,12 +251,91 @@ function updatePlayPauseIcon() {
 }
 
 // ---- Controls ---------------------------------------------------------
+const playerWrap = document.getElementById("player-wrap");
+const fullscreenButton = document.getElementById("fullscreen");
+function isVideoFullscreen() {
+  return document.fullscreenElement === playerWrap || document.webkitFullscreenElement === playerWrap || playerWrap.classList.contains("video-fullscreen");
+}
+function updateFullscreen() {
+  const active = isVideoFullscreen();
+  fullscreenButton.setAttribute("aria-pressed", String(active));
+  fullscreenButton.title = t(active ? "Exit video fullscreen (Back / Esc)" : "Video fullscreen (f)");
+  fullscreenButton.setAttribute("aria-label", fullscreenButton.title);
+  fullscreenButton.focus();
+}
+async function toggleFullscreen() {
+  if (isVideoFullscreen()) {
+    if (playerWrap.classList.contains("video-fullscreen")) {
+      playerWrap.classList.remove("video-fullscreen");
+    } else {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      try { await exit.call(document); } catch (err) { console.warn("Fullscreen exit failed", err); }
+    }
+  } else {
+    const enter = playerWrap.requestFullscreen || playerWrap.webkitRequestFullscreen;
+    try {
+      if (!enter) throw new Error("Fullscreen API unavailable");
+      await enter.call(playerWrap);
+    } catch {
+      // Older TV browsers can still expand the video within the page.
+      playerWrap.classList.add("video-fullscreen");
+    }
+  }
+  updateFullscreen();
+}
+
+function handleHostKey(e) {
+  const key = e.key && e.key !== "Unidentified" ? e.key : ({ 4: "BrowserBack", 19: "ArrowUp", 20: "ArrowDown", 21: "ArrowLeft", 22: "ArrowRight", 23: "Enter", 66: "Enter", 85: "MediaPlayPause", 87: "MediaTrackNext", 10009: "BrowserBack" })[e.keyCode] || "";
+  const target = document.activeElement;
+  const textInput = target?.matches('input:not([type="range"]), textarea, [contenteditable="true"]');
+  if (["Escape", "BrowserBack", "GoBack", "Backspace"].includes(key) && isVideoFullscreen()) {
+    e.preventDefault();
+    if (!e.repeat) toggleFullscreen();
+    return;
+  }
+  if (e.defaultPrevented || textInput) return;
+  if (key.startsWith("Arrow")) {
+    if (target?.id === "volume" && ["ArrowLeft", "ArrowRight"].includes(key)) return;
+    e.preventDefault();
+    const controls = isVideoFullscreen() ? [fullscreenButton] : [...document.querySelectorAll("button, input")].filter((el) => !el.disabled && el.getClientRects().length);
+    if (!controls.length) return;
+    const from = target?.getBoundingClientRect();
+    const vertical = key === "ArrowUp" || key === "ArrowDown";
+    const direction = key === "ArrowUp" || key === "ArrowLeft" ? -1 : 1;
+    const axis = vertical ? "y" : "x";
+    const cross = vertical ? "x" : "y";
+    const center = (rect, dimension) => dimension === "x" ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+    const candidates = controls.filter((el) => el !== target).map((el) => {
+      const rect = el.getBoundingClientRect();
+      const distance = from ? direction * (center(rect, axis) - center(from, axis)) : 0;
+      return { el, distance, score: from ? distance + 2 * Math.abs(center(rect, cross) - center(from, cross)) : 0 };
+    }).filter(({ distance }) => distance > 1).sort((a, b) => a.score - b.score);
+    (candidates[0]?.el || (controls.includes(target) ? target : controls[0])).focus();
+    return;
+  }
+  if (["Enter", "Select", "Accept"].includes(key) && target?.tagName === "BUTTON") {
+    e.preventDefault();
+    if (!e.repeat) target.click();
+    return;
+  }
+  const action = key === " " || e.code === "Space" || key === "MediaPlayPause" ? "playpause"
+    : key.toLowerCase() === "n" || key === "MediaTrackNext" ? "skip"
+    : key.toLowerCase() === "f" ? "fullscreen" : null;
+  if (started && action) {
+    e.preventDefault();
+    if (!e.repeat) document.getElementById(action).click();
+  }
+}
+
 function wireControls() {
+  fullscreenButton.onclick = toggleFullscreen;
+  document.addEventListener("fullscreenchange", updateFullscreen);
+  document.addEventListener("webkitfullscreenchange", updateFullscreen);
   document.getElementById("playpause").onclick = () => {
     send({ type: latestState.paused ? "play" : "pause" });
   };
   document.getElementById("skip").onclick = () => send({ type: "skip" });
-  // Filter pill cycles: 關 → 開 (normal) → 嚴格 (family-friendly only) → 關.
+  // Filter pill cycles: Off → On (normal) → Strict (family-friendly only) → Off.
   document.getElementById("filter-toggle").onclick = () => {
     if (!filterOn) send({ type: "setFilter", on: true, mode: "default" });
     else if (moderationMode !== "strict") send({ type: "setFilter", on: true, mode: "strict" });
@@ -264,7 +354,7 @@ function wireControls() {
     paintVol();
     send({ type: "setVolume", volume: Number(volEl.value) });
   };
-  // Event-context editor: the 場景 pill reveals an input; 儲存 sends it.
+  // Event-context editor: the Event context pill reveals an input; Save sends it.
   const ctxRow = document.getElementById("context-row");
   const ctxInput = document.getElementById("context-input");
   document.getElementById("context-toggle").onclick = () => {
@@ -274,16 +364,16 @@ function wireControls() {
   document.getElementById("context-save").onclick = () => {
     send({ type: "setEventContext", context: ctxInput.value.trim() });
     ctxRow.classList.add("hidden");
+    document.getElementById("context-toggle").focus();
   };
   ctxInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") document.getElementById("context-save").click();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      document.getElementById("context-save").click();
+    }
   });
 
-  document.addEventListener("keydown", (e) => {
-    if (e.target.tagName === "INPUT") return; // typing in the context field
-    if (e.code === "Space") { e.preventDefault(); document.getElementById("playpause").click(); }
-    if (e.key.toLowerCase() === "n") document.getElementById("skip").click();
-  });
+  document.addEventListener("keydown", handleHostKey);
 }
 
 // ---- Bootstrap --------------------------------------------------------
@@ -314,9 +404,11 @@ document.getElementById("start-btn").onclick = () => {
   started = true;
   document.getElementById("start-overlay").classList.add("hidden");
   document.getElementById("stage").classList.remove("hidden");
+  document.getElementById("playpause").focus();
   syncPlayer();
 };
 
 loadInfo();
 wireControls();
+document.getElementById("start-btn").focus();
 connectWs();

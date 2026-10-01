@@ -56,7 +56,7 @@ Built for a real graduation dinner in Hong Kong; designed to work for any event.
 <div align="center">
 <img src="docs/guest.png" alt="Guest phone page — explore, search, and queue" width="330" />
 
-<em>The guest page on a phone: name, search, singer chips, one-tap requests.</em>
+<em>The guest page on a phone: Thai nickname, search, singer chips, one-tap requests.</em>
 </div>
 
 ## Quick start
@@ -94,7 +94,7 @@ sign in (any username, `HOST_PASSWORD` as the password), then click **เริ�
 | `/explore` | Alias of the Guest page with Thailand charts on first load |
 | `/admin` | Password-protected remote controls, queue drag/drop, search and requests |
 | `GET /api/host-token` | Basic-auth-protected WebSocket control token (not cached) |
-| `GET /api/search?q=` | Scrapes YouTube search results (no API key) |
+| `GET /api/search?q=&mode=songs\|karaoke\|videos` | YouTube Music songs, karaoke or music videos (no API key) |
 | `GET /api/browse?q=` | Cached, singles-only search behind the explore tabs |
 | `POST /api/request` | Guardrails → playability check → (optional AI filter) → enqueue |
 | WebSocket `/` | Broadcasts queue state; carries host controls |
@@ -254,8 +254,25 @@ DEFAULT_LOCALE=th-TH
 เปิด `/` บน TV/TV Box เข้าสู่ระบบด้วยชื่อผู้ใช้ใดก็ได้และรหัส `HOST_PASSWORD`
 แล้วกด **เริ่มเล่น** หนึ่งครั้งเพื่ออนุญาตเสียง เปิด `/admin` บนมือถือหรือคอมพิวเตอร์
 เพื่อควบคุมเพลง ผู้ฟังเปิด `/guest` ค้นหาและเพิ่มเพลงได้โดยไม่ต้องเข้าสู่ระบบ
+หน้า Guest มีลิงก์ไป Admin ซึ่งยังต้องเข้าสู่ระบบตามเดิม
+หน้า Host ใช้ลูกศรรีโมตเลือกปุ่มและกด **OK/Enter** ได้ (ปุ่มเริ่มเล่นถูกเลือกไว้แล้ว)
+ปรับเสียงด้วยซ้าย/ขวาขณะเลือกแถบเสียง ใช้ขึ้น/ลงเพื่อออกจากแถบเสียง
+ปุ่มมุมขวาบนวิดีโอหรือ **F** เปิดวิดีโอเต็มจอ กด **OK** ที่ปุ่มเดิมหรือ **Back/Esc** เพื่อกลับ layout เดิม
+Browser ที่ไม่มี Fullscreen API จะขยายวิดีโอเต็มพื้นที่หน้าเว็บแทน รองรับปุ่มสื่อเล่น/หยุดและข้ามเพลงด้วย
+Guest/Admin แยก **ค้นหาเพลง** และ **คิวเพลง** เป็นคนละแท็บ โดยคิวยังอัปเดตสดขณะอยู่แท็บค้นหา
+กดปุ่มโหมด **วิดีโอเพลง / คาราโอเกะ / เพลง** ได้ในแท็บค้นหา โดย Guest/Admin เริ่มต้นที่ **วิดีโอเพลง**: เพลงใช้ YouTube Music หมวด Songs
+ส่วนคาราโอเกะใช้วิดีโอ YouTube และเติมคำว่า `karaoke` หากคำค้นยังไม่มีคำนี้หรือ “คาราโอเกะ”
+วิดีโอเพลงค้นหาวิดีโอ YouTube โดยเติม `official music video` หากยังไม่ได้ระบุในคำค้น
+Guest และ Admin มีเพลงแนะนำ หมวดเพลง ปุ่มศิลปิน และปุ่มสุ่มเหมือนกัน ใช้โหมดที่เลือกด้วย ทุกโหมดเพิ่มเข้าคิวเดียวกันและเล่นบน Player เดิม
+`/api/search` และ `/api/browse` รองรับ `mode=songs` (ค่าเริ่มต้น) หรือ `mode=karaoke` / `mode=videos`
+
+Guest/Admin สุ่มชื่อเล่นภาษาไทยจาก 100 ชื่อ เก็บไว้ใน browser และแสดง “เพิ่มเพลง โดย {nickname}”
+ชื่อเล่นนี้ส่งเป็นชื่อผู้เพิ่มเพลงโดยไม่ต้องกรอกเอง ผลค้นหาและเพลงแนะนำแสดงครั้งละ 5 เพลง
+กด **เพลงเพิ่มเติม** เพื่อแสดงเพิ่มอีกไม่เกิน 5 เพลง คิวเพลงยังแสดงครบ
 ค้นหาเพลงต่างประเทศได้ตามปกติ ชาร์ตประเทศเลือกจาก YouTube ตาม `DEFAULT_REGION`
-ข้อความ UI อยู่ใน `public/i18n.js` สามารถเพิ่ม dictionary ภาษาอื่นได้ในภายหลัง
+UI ใช้ภาษาไทยเป็นหลักและอังกฤษเป็นคำรอง ไม่มีข้อความจีนใน UI ที่กำหนดไว้
+ข้อความอยู่ใน `public/i18n.js` และใช้ชื่อศิลปินอังกฤษในปุ่มแนะนำ
+ชื่อเพลงและข้อมูลศิลปินจาก YouTube แสดงตามต้นฉบับ
 
 Admin แสดงชื่อเพลง รูป ระยะเวลาและชื่อผู้เพิ่ม รองรับลากจัดลำดับด้วยเมาส์/สัมผัส
 และมีปุ่มเลื่อนขึ้น/ลงสำหรับคีย์บอร์ด **ล้างคิว** ลบเฉพาะเพลงที่รอ
@@ -293,6 +310,9 @@ bun run test
 ```
 
 ใช้ Node assertions และ HTTP/WebSocket จริงใน directory ชั่วคราว จำลองเฉพาะ YouTube
+ตรวจลำดับโหลด YouTube API ของ Host ด้วย: ลงทะเบียน callback ก่อนโหลด API
+เพื่อให้ Player เริ่มเล่นได้แม้ API โหลดเร็วจาก cache (ทดสอบนี้จำลอง Player)
+รวมการเลือกปุ่มด้วยรีโมต, OK, ปุ่มสื่อ และเต็มจอแบบ native/fallback โดยจำลอง DOM และ Fullscreen API
 ไม่แตะ `.env`, queue หรือ settings ของระบบที่กำลังใช้งาน ครอบคลุมการเพิ่มเพลง, sync
 Admin/Player/Guest, reorder, ลบ, clear, play now, play/pause/skip/volume,
 refresh/reconnect, สิทธิ์ผู้ใช้/กรณีไม่ตั้ง password, input validation,
@@ -312,6 +332,9 @@ refresh/reconnect, สิทธิ์ผู้ใช้/กรณีไม่ต
 9. เปิด `/explore`: โหลดชาร์ตประเทศไทยก่อน และยังค้นหาเพลงสากลได้
 10. ตรวจ Docker ในเครื่องทดสอบ: `docker compose config --quiet` และ
     `docker compose up -d --build` (ต้องมี network `reverseproxy` เดิม)
+11. บน TV Box ใช้รีโมตกด OK เริ่มเล่น เลื่อนด้วยลูกศรไปเล่น/ข้าม/เสียง/ลบเพลง
+    กรอบโฟกัสต้องเห็นชัดและยังอยู่เมื่อคิวอัปเดต เข้าเต็มจอแล้วกด Back หรือ OK เพื่อออก
+    ตรวจว่าภาพกับเสียงเล่นต่อและ layout ปกติกลับมาเหมือนเดิม
 
 YouTube IFrame อาจจำกัด autoplay/การฝังหรือการเล่นตามประเทศ ต้องตรวจเสียงจริงบน TV/TV Box
 เมื่อใช้งาน Browser automation ที่จำลอง IFrame จะยืนยันได้เฉพาะคำสั่งที่ส่งให้ Player
