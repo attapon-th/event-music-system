@@ -9,6 +9,7 @@ RUN bun install --frozen-lockfile --production
 
 # App source.
 COPY server.js ./
+COPY LICENSE ./
 COPY src ./src
 COPY public ./public
 COPY scripts ./scripts

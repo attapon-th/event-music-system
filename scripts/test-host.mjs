@@ -17,6 +17,10 @@ for (const earlyReady of [false, true]) {
   const messages = [];
   const timers = [];
   const listeners = {};
+  const historyStates = [{ previousPage: true }, null];
+  let historyIndex = 1;
+  let nativeBackExitsFirst = false;
+  const settleFullscreen = () => new Promise(resolve => setImmediate(resolve));
   const document = {
     activeElement: null,
     getElementById(id) {
@@ -24,7 +28,7 @@ for (const earlyReady of [false, true]) {
         const classes = new Set();
         const attributes = new Map();
         nodes.set(id, {
-        id, tagName: id.includes("input") || id === "volume" ? "INPUT" : "BUTTON", dataset: {},
+        id, tagName: id === "player-wrap" ? "DIV" : id.includes("input") || id === "volume" ? "INPUT" : "BUTTON", dataset: {},
         children: [], handlers: {},
         set innerHTML(value) { this.children = []; this.markup = value; },
         get innerHTML() { return this.markup; },
@@ -56,7 +60,22 @@ for (const earlyReady of [false, true]) {
   };
   const context = createContext({
     document, location: { protocol: "http:", host: "localhost" },
-    addEventListener() {}, setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {},
+    addEventListener(type, handler) { listeners[type] = handler; },
+    history: {
+      get state() { return historyStates[historyIndex]; },
+      pushState(value) { historyStates.splice(++historyIndex); historyStates.push(value); },
+      replaceState(value, _title, url) { historyStates[historyIndex] = value; this.url = url; },
+      back() { queueMicrotask(() => {
+        if (!historyIndex) return;
+        if (nativeBackExitsFirst && document.fullscreenElement) {
+          document.fullscreenElement = null;
+          listeners.fullscreenchange();
+        }
+        historyIndex--;
+        listeners.popstate?.({ state: historyStates[historyIndex] });
+      }); },
+    },
+    setTimeout: (fn, delay) => { timers.push(fn); if (delay === 0) queueMicrotask(fn); return timers.length; }, clearTimeout() {},
     fetch: async () => ({ ok: true, json: async () => ({ token: "test-token", guestUrl: "http://localhost/guest" }) }),
     WebSocket: class { readyState = 1; send(data) { messages.push(JSON.parse(data)); } },
   });
@@ -171,30 +190,71 @@ for (const earlyReady of [false, true]) {
   await fullscreen.click();
   assert.equal(wrap.classList.contains("video-fullscreen"), true, "No Fullscreen API: expand video within page");
   assert.equal(fullscreen.getAttribute("aria-pressed"), "true");
+  assert.equal(fullscreen.hidden, true, "Fullscreen hides its icon");
   press("ArrowDown");
-  assert.equal(document.activeElement, fullscreen, "Fullscreen focus stays on its visible exit control");
-  press("Unidentified", { keyCode: 4 });
+  assert.equal(document.activeElement, wrap, "Fullscreen must not focus a hidden control");
+  const fullscreenMessages = messages.length;
+  press("Enter");
+  assert.equal(wrap.classList.contains("video-fullscreen"), true, "OK does not click the hidden fullscreen button");
+  context.history.back();
+  await settleFullscreen();
+  assert.equal(wrap.classList.contains("video-fullscreen"), false, "Browser Back restores Player without leaving the page");
+  assert.equal(fullscreen.hidden, false);
+  assert.equal(document.activeElement, fullscreen);
+  assert.equal(historyIndex, 1);
+  assert.equal(state, 1, "Leaving fullscreen keeps playback running");
+  assert.equal(messages.length, fullscreenMessages, "Back must not close the room or change the queue");
+  await fullscreen.click();
+  assert.equal(press("Unidentified", { keyCode: 4 }).defaultPrevented, true);
+  await settleFullscreen();
   assert.equal(wrap.classList.contains("video-fullscreen"), false, "Remote Back restores original layout");
   wrap.requestFullscreen = async () => { document.fullscreenElement = wrap; listeners.fullscreenchange(); };
   document.exitFullscreen = async () => { document.fullscreenElement = null; listeners.fullscreenchange(); };
   await fullscreen.click();
   assert.equal(document.fullscreenElement, wrap, "Fullscreen targets video wrapper, keeping exit reachable");
   press("Escape");
-  await Promise.resolve();
+  await settleFullscreen();
   assert.equal(document.fullscreenElement, null);
   assert.equal(fullscreen.getAttribute("aria-pressed"), "false");
+  assert.equal(fullscreen.hidden, false);
+  assert.equal(historyIndex, 1, "Escape consumes the fullscreen history entry");
+  await fullscreen.click();
+  context.history.back();
+  await settleFullscreen();
+  assert.equal(document.fullscreenElement, null, "Browser Back also exits native fullscreen");
+  await fullscreen.click();
+  document.fullscreenElement = null;
+  listeners.fullscreenchange();
+  await settleFullscreen();
+  assert.equal(historyIndex, 1, "Browser-native fullscreen exits do not leave extra history entries");
+  await fullscreen.click();
+  nativeBackExitsFirst = true;
+  context.history.back();
+  await settleFullscreen();
+  nativeBackExitsFirst = false;
+  assert.equal(historyIndex, 1, "Native exit before popstate must not navigate back twice and leave Player");
   wrap.requestFullscreen = async () => { throw new Error("Unsupported TV browser"); };
   await fullscreen.click();
   assert.equal(wrap.classList.contains("video-fullscreen"), true, "Rejected native fullscreen also falls back");
-  press("Enter");
-  assert.equal(wrap.classList.contains("video-fullscreen"), false, "OK exits fullscreen without mouse");
+  assert.equal(fullscreen.hidden, true);
+  assert.equal(press("Back", { keyCode: 10009 }).defaultPrevented, true);
+  await settleFullscreen();
+  assert.equal(wrap.classList.contains("video-fullscreen"), false, "TV Back exits fullscreen without mouse");
+  assert.equal(fullscreen.hidden, false);
   runInContext('latestState.queue = [{ id: "queued-1", title: "Queued", channel: "Artist" }]; render();', context);
   document.getElementById("queue").querySelectorAll()[0].focus();
   runInContext("render();", context);
   assert.equal(document.activeElement.dataset.queueId, "queued-1", "Queue broadcasts preserve remote selection");
   runInContext("latestState.queue = []; render();", context);
   assert.equal(document.activeElement, skip, "Removing focused track returns focus to a visible control");
+  await fullscreen.click();
+  context.Room.token = null;
   runInContext('ws.onmessage({data: JSON.stringify({type: "sessionEnded"})})', context);
+  context.history.replaceState(null, "", "/"); // Room.close resets the entry URL before the deferred exit.
+  await settleFullscreen();
   assert.equal(state, -1, "Revoked Player stops audio");
+  assert.equal(wrap.classList.contains("video-fullscreen"), false, "Ended room exits fullscreen");
+  assert.equal(historyIndex, 1);
+  assert.equal(context.history.url, "/", "Room closure does not restore an obsolete room URL");
 }
 console.log("PASS: Host playback load orders, remote focus/OK/media keys, native/fallback fullscreen. YouTube and browser simulated.");

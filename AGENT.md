@@ -32,7 +32,7 @@ There is no frontend bundler or compilation step.
 | `src/sessions.js` | Room lifecycle, membership and roles and in-memory credentials |
 | `src/state.js` | `JukeboxState`: authoritative queue, current track, history, pause state, volume |
 | `src/youtube.js` | YouTube Music search/country charts, oEmbed checks, watch-page metadata |
-| `src/moderation.js` | Optional event-aware LLM content filter |
+| `src/moderation.js` | Retained LLM content filter; paused and outside current development |
 | `public/host.*` | Player at `/`: YouTube IFrame, welcome entry, QR visibility and room exit |
 | `public/guest.*` | Public search, Explore, song requests, queue display at `/guest` and `/explore` |
 | `public/admin.*` | Authorized remote controls and queue editing at `/a`; reuses Guest search/request scripts |
@@ -50,7 +50,7 @@ There is no frontend bundler or compilation step.
   incomplete, duplicate, or obsolete ID sets so concurrent requests cannot disappear.
 - Use queue item `id` for editing and YouTube `videoId` for duplicate detection
   and completion reports. Preserve the stale `ended`/`error` guard.
-- Recheck duplicate and queue-cap conditions after asynchronous YouTube/moderation
+- Recheck duplicate and queue-cap conditions after asynchronous YouTube
   work. The request limit is 50 upcoming tracks; history is capped at 100 items.
 - Playback state and volume belong to the server snapshot. Player applies them
   through the IFrame API; Admin remains a controller rather than an audio source.
@@ -70,17 +70,19 @@ There is no frontend bundler or compilation step.
 ## Integration and UI details
 
 - Keep the request sequence: validation/cooldown/duplicate/cap checks → playability
-  check → optional moderation → final duplicate/cap checks → enqueue/broadcast.
+  check → final duplicate/cap checks → enqueue/broadcast.
   Cooldown uses IP plus a client-chosen device ID, not authenticated guest identity.
-- YouTube search uses the internal InnerTube Songs endpoint without an API key.
+- Songs use the internal YouTube Music InnerTube Songs endpoint without an API key.
+  Video search uses regular YouTube with unchanged queries and preserves result
+  order, including live and long videos. Karaoke still adds its keyword and excludes live results.
   Chart discovery uses the configured country, with `TH`/`th-TH` defaults.
   Both `__hits` and the legacy `__hk_hits` browse sentinel use that country.
   Keep international searches available. Browse caches results for 30 minutes
   and excludes unknown/live durations and tracks longer than 10 minutes.
-- Preserve moderation failure behavior: approve on missing key, HTTP or network
-  failure; reject with a retryable message on timeout; reject provider content
-  filtering or replies without an explicit boolean verdict. OpenRouter web
-  search stays opt-in. Provider configuration lives in environment variables.
+- AI is paused and outside current development. Keep the retained moderation
+  module dormant, request processing free of AI/metadata calls, and legacy API
+  fields compatible with the disabled state. Environment settings and `setFilter`
+  must leave AI disabled.
 - Keep user-facing UI Thai through the dictionary; preserve YouTube titles and
   artist names. Icon buttons retain Thai `title`/`aria-label`, keyboard access,
   and touch targets. Reacquire pointer capture after moving a dragged row in the DOM.
@@ -103,7 +105,7 @@ binds temporary localhost ports, copies source into a temporary directory, and
 mocks YouTube responses; it does not exercise actual IFrame audio or UI drag/drop.
 For Player/UI changes, follow the browser/TV checklist in README, including Guest
 requests, Admin controls, queue synchronization, refresh, and unauthenticated access.
-Use `bun run check-llm` only when intentionally checking a configured provider.
+The standalone `check-llm` script is retained for future AI work.
 
 For deployment changes, check `docker compose config --quiet`, build the image,
 and verify startup in an isolated container. Keep `.env` secrets out of commits.

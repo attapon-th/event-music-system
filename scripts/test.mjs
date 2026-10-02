@@ -34,6 +34,10 @@ const row = (id, title) => ({ musicResponsiveListItemRenderer: {
   fixedColumns: [{ musicResponsiveListItemFixedColumnRenderer: { text: { runs: [{ text: '3:20' }] } } }]
 }});
 globalThis.fetch = async (url, options) => {
+  if (String(url).startsWith('https://moderation.invalid/') || String(url).startsWith('https://www.youtube.com/watch?')) {
+    writeFileSync(new URL('./unexpected-ai-request', import.meta.url), String(url));
+    throw new Error('AI and moderation metadata requests must stay disabled');
+  }
   if (String(url).includes('youtube.com/oembed')) {
     if (String(url).includes('slow0000001')) {
       writeFileSync(new URL('./request-started', import.meta.url), 'yes');
@@ -48,14 +52,13 @@ globalThis.fetch = async (url, options) => {
   if (String(url).includes('www.youtube.com/youtubei')) {
     assert.equal(body.context.client.clientName, 'WEB');
     assert.equal(body.params, 'EgIQAQ%3D%3D');
-    assert.match(body.query, /karaoke|คาราโอเกะ|music video|official mv|วิดีโอเพลง/i);
     const karaoke = /karaoke|คาราโอเกะ/i.test(body.query);
     const video = (id, duration) => ({ videoRenderer: {
-      videoId: id, title: { runs: [{text: body.query}] }, ownerText: {runs:[{text:karaoke ? 'Karaoke channel' : 'Official artist'}]},
+      videoId: id, title: { runs: [{text: body.query}] }, ownerText: {runs:[{text:karaoke ? 'Karaoke channel' : 'Video channel'}]},
       ...(duration ? {lengthText: {simpleText: duration}} : {}), thumbnail: {thumbnails:[{url:'https://example.com/thumb.jpg'}]}
     }});
     return Response.json({contents:{twoColumnSearchResultsRenderer:{primaryContents:{sectionListRenderer:{contents:[
-      {itemSectionRenderer:{contents:[{channelRenderer:{}}, video('live0000001'), video(karaoke ? 'karaoke0001' : 'mv000000001','3:30'), video(karaoke ? 'karaoke0002' : 'mv000000002','1:20:00')]}}
+      {itemSectionRenderer:{contents:[{channelRenderer:{}}, {playlistRenderer:{}}, video('live0000001'), video(karaoke ? 'karaoke0001' : 'mv000000001','3:30'), video(karaoke ? 'karaoke0002' : 'mv000000002','1:20:00')]}}
     ]}}}}});
   }
   if (body.query) {
@@ -90,7 +93,7 @@ let logs = "";
 function start(password) {
   child = spawn("node", ["--import", join(temp, "mock-youtube.mjs"), join(temp, "server.js")], {
     cwd: temp,
-    env: { ...process.env, PORT: String(port), HOST_PASSWORD: password, ENABLE_MODERATION: "false", DEFAULT_REGION: "TH", DEFAULT_LOCALE: "th-TH", PUBLIC_URL: "", LLM_API_KEY: "" },
+    env: { ...process.env, PORT: String(port), HOST_PASSWORD: password, ENABLE_MODERATION: "true", MODERATION_MODE: "strict", EVENT_CONTEXT: "Legacy AI context", DEFAULT_REGION: "TH", DEFAULT_LOCALE: "th-TH", PUBLIC_URL: "", LLM_API_KEY: "test-key", LLM_BASE_URL: "https://moderation.invalid/v1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.on("data", (data) => { logs += data; });
@@ -176,6 +179,9 @@ try {
   assert.match(info.qr, /^data:image\/png;base64,/);
   assert.equal(info.defaultRegion, "TH");
   assert.equal(info.defaultLocale, "th-TH");
+  assert.equal(info.filterOn, false, "legacy environment settings cannot enable AI");
+  assert.equal(info.moderationConfigured, false, "AI reports disabled even with a configured key");
+  assert.equal(info.moderationMode, "default");
   assert.equal((await (await fetch(base + "/api/search?q=Bruno%20Mars")).json()).results[0].title, "Bruno Mars");
   assert.equal((await (await fetch(base + "/api/browse?q=__hits")).json()).results[0].title, "Thailand chart");
   const karaoke = (await (await fetch(base + "/api/search?q=Bruno%20Mars&mode=karaoke")).json()).results;
@@ -194,12 +200,17 @@ try {
   assert.equal(karaokeBrowse[0].title, "เพลงไทยยอดนิยม karaoke");
   assert.equal((await (await fetch(base + "/api/browse?q=__hits")).json()).results[0].title, "Thailand chart", "mode caches stay separate");
   const videos = (await (await fetch(base + "/api/search?q=Bruno%20Mars&mode=videos")).json()).results;
-  assert.equal(videos.length, 2);
-  assert.equal(videos[0].title, "Bruno Mars official music video");
-  assert.equal(videos[0].channel, "Official artist");
+  assert.deepEqual(videos.map(({ videoId, duration }) => ({ videoId, duration })), [
+    { videoId: "live0000001", duration: "" },
+    { videoId: "mv000000001", duration: "3:30" },
+    { videoId: "mv000000002", duration: "1:20:00" },
+  ], "video search keeps live, short and long videos in YouTube order; excludes channels/playlists");
+  assert.ok(videos.every((video) => video.title === "Bruno Mars"), "video query has no suffix");
+  assert.equal(videos[0].channel, "Video channel");
+  assert.equal((await (await fetch(base + "/api/search?q=" + encodeURIComponent("สอนทำอาหาร") + "&mode=videos")).json()).results[0].title, "สอนทำอาหาร", "non-music Thai query is unchanged");
   assert.equal((await (await fetch(base + "/api/search?q=test%20official%20music%20video&mode=videos")).json()).results[0].title, "test official music video");
-  assert.equal((await (await fetch(base + "/api/browse?q=Bruno%20Mars&mode=videos")).json()).results.length, 1);
-  assert.equal((await (await fetch(base + "/api/browse?q=Bruno%20Mars&mode=songs")).json()).results[0].title, "Bruno Mars", "music-video cache stays separate from audio search");
+  assert.deepEqual((await (await fetch(base + "/api/browse?q=Bruno%20Mars&mode=videos")).json()).results.map((video) => video.videoId), ["mv000000001"], "browse still excludes unknown/live durations and compilations");
+  assert.equal((await (await fetch(base + "/api/browse?q=Bruno%20Mars&mode=songs")).json()).results[0].title, "Bruno Mars", "video cache stays separate from audio search");
   assert.equal((await (await fetch(base + "/api/browse?q=__hits&mode=videos")).json()).results[0].title, "Thailand chart");
   const unauthenticated = await socket();
   assert.equal(unauthenticated.snapshot, undefined, "unauthenticated socket receives no queue");
@@ -288,16 +299,21 @@ try {
   assert.equal(concurrent.filter((result) => result.ok).length, 1);
   assert.equal((await request(karaoke[0].videoId)).ok, true, "karaoke uses the existing request pipeline");
   await sync((s) => s.queue.some((item) => item.videoId === karaoke[0].videoId));
-  assert.equal((await request(videos[0].videoId)).ok, true, "music videos use the existing request pipeline");
+  assert.equal((await request(videos[0].videoId)).ok, true, "videos use the existing request pipeline");
   await sync((s) => s.queue.some((item) => item.videoId === videos[0].videoId));
   const bad = await fetch(base + "/api/request", { method: "POST", headers: { "Content-Type": "application/json", ...auth(requestToken) }, body: JSON.stringify({ videoId: {}, title: "bad", clientId: { toString: 1 } }) });
   assert.equal(bad.status, 400);
+  const messagesBeforeFilter = admin.messages.length;
   send(admin, "setFilter", { on: true, mode: "strict" });
-  await waitFor(() => admin.messages.at(-1)?.moderationMode === "strict");
+  await waitFor(() => admin.messages.length > messagesBeforeFilter);
+  assert.equal(admin.messages.at(-1).filterOn, false, "legacy WebSocket command cannot enable AI");
+  assert.equal(admin.messages.at(-1).moderationMode, "default");
   assert.equal(otherRoom.messages.at(-1).filterOn, false);
   send(admin, "setEventContext", { context: "งานแต่งงาน" });
   await waitFor(() => admin.messages.at(-1)?.eventContext === "งานแต่งงาน");
   assert.equal(otherRoom.messages.at(-1).eventContext, "");
+  assert.equal((await request(videos[2].videoId)).ok, true, "long videos still enqueue after an attempted AI enable");
+  await sync((s) => s.queue.some((item) => item.videoId === videos[2].videoId));
   const oldTab = await socket(roomA.token);
   await waitFor(() => player.messages.some(msg => msg.code === "PLAYER_MOVED"));
   assert.deepEqual(oldTab.snapshot, admin.snapshot);
@@ -368,7 +384,8 @@ try {
   state.setPaused("yes");
   assert.equal(changes, 0);
   assert.equal(state.reorder([]), true);
-  console.log("PASS: isolated rooms/queues/settings; primary Admin/Controller grant/revoke; room closing; heartbeat/expiry/in-flight requests; restart; lifecycle logs; rate limits; queue controls; Thailand search; validation.");
+  assert.equal(existsSync(join(temp, "unexpected-ai-request")), false, "requests never call AI or fetch moderation metadata");
+  console.log("PASS: isolated rooms/queues/settings; primary Admin/Controller grant/revoke; room closing; heartbeat/expiry/in-flight requests; restart; lifecycle logs; rate limits; queue controls; Thailand search; unmodified video queries/order; AI disabled; validation.");
 } finally {
   for (const ws of sockets) ws.terminate();
   if (child && child.exitCode === null) { child.kill(); await once(child, "exit"); }

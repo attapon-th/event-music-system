@@ -62,7 +62,7 @@ const UI_MESSAGES = { th: {
   "searchMode": "โหมดค้นหา",
   "songs": "เพลง",
   "karaoke": "คาราโอเกะ",
-  "musicVideos": "วิดีโอเพลง",
+  "videos": "วีดีโอ",
   "Browse songs": "สำรวจเพลง",
   "explore": "เพลงแนะนำ",
   "Explore": "Explore",

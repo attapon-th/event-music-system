@@ -216,17 +216,40 @@ function updatePlayPauseIcon() {
 // ---- Controls ---------------------------------------------------------
 const playerWrap = document.getElementById("player-wrap");
 const fullscreenButton = document.getElementById("fullscreen");
+let fullscreenActive = false;
+let fullscreenHistory = false;
 function isVideoFullscreen() {
   return document.fullscreenElement === playerWrap || document.webkitFullscreenElement === playerWrap || playerWrap.classList.contains("video-fullscreen");
 }
 function updateFullscreen() {
   const active = isVideoFullscreen();
+  if (active !== fullscreenActive) {
+    fullscreenActive = active;
+    if (active) {
+      history.pushState({ ...history.state, videoFullscreen: true }, "");
+      fullscreenHistory = true;
+    } else if (fullscreenHistory) {
+      // Native Back may exit fullscreen before popstate; let that traversal finish.
+      setTimeout(() => {
+        if (fullscreenHistory && !isVideoFullscreen()) history.back();
+      }, 0);
+    }
+  }
+  fullscreenButton.hidden = active;
   fullscreenButton.setAttribute("aria-pressed", String(active));
   fullscreenButton.title = t(active ? "Exit video fullscreen (Back / Esc)" : "Video fullscreen (f)");
   fullscreenButton.setAttribute("aria-label", fullscreenButton.title);
-  fullscreenButton.focus();
+  if (active) playerWrap.focus();
+  else if (Room.token) fullscreenButton.focus();
 }
+window.addEventListener("popstate", () => {
+  const owned = fullscreenHistory;
+  fullscreenHistory = false;
+  if (isVideoFullscreen()) toggleFullscreen();
+  if (owned && !Room.token) history.replaceState(null, "", "/");
+});
 async function toggleFullscreen() {
+  if (!isVideoFullscreen() && fullscreenHistory) return; // Wait for the exit's history traversal.
   if (isVideoFullscreen()) {
     if (playerWrap.classList.contains("video-fullscreen")) {
       playerWrap.classList.remove("video-fullscreen");
@@ -252,7 +275,7 @@ function handleHostKey(e) {
   const key = e.key && e.key !== "Unidentified" ? e.key : ({ 4: "BrowserBack", 19: "ArrowUp", 20: "ArrowDown", 21: "ArrowLeft", 22: "ArrowRight", 23: "Enter", 66: "Enter", 85: "MediaPlayPause", 87: "MediaTrackNext", 10009: "BrowserBack" })[e.keyCode] || "";
   const target = document.activeElement;
   const textInput = target?.matches('input:not([type="range"]), textarea, [contenteditable="true"]');
-  if (["Escape", "BrowserBack", "GoBack", "Backspace"].includes(key) && isVideoFullscreen()) {
+  if (["Escape", "Back", "BrowserBack", "GoBack", "Backspace"].includes(key) && isVideoFullscreen()) {
     e.preventDefault();
     if (!e.repeat) toggleFullscreen();
     return;
@@ -261,7 +284,7 @@ function handleHostKey(e) {
   if (key.startsWith("Arrow")) {
     if (target?.id === "volume" && ["ArrowLeft", "ArrowRight"].includes(key)) return;
     e.preventDefault();
-    const controls = isVideoFullscreen() ? [fullscreenButton] : [...document.querySelectorAll("button, input")].filter((el) => !el.disabled && el.getClientRects().length);
+    const controls = isVideoFullscreen() ? [playerWrap] : [...document.querySelectorAll("button, input")].filter((el) => !el.disabled && el.getClientRects().length);
     if (!controls.length) return;
     const from = target?.getBoundingClientRect();
     const vertical = key === "ArrowUp" || key === "ArrowDown";

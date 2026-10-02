@@ -46,8 +46,8 @@ const source = ["i18n.js", "guest.js"].map((file) => readFileSync(new URL(`../pu
 runInContext(source, context);
 await Promise.resolve();
 const run = (code) => runInContext(code, context);
-assert.equal(run("searchMode"), "videos", "Guest and Admin default to music videos");
-assert.equal(new URL(initialRequests[0], "http://localhost").searchParams.get("mode"), "videos", "Initial recommendations use music-video mode");
+assert.equal(run("searchMode"), "videos", "Guest and Admin default to videos");
+assert.equal(new URL(initialRequests[0], "http://localhost").searchParams.get("mode"), "videos", "Initial recommendations use video mode");
 const publicDir = new URL("../public/", import.meta.url);
 for (const file of readdirSync(publicDir).filter((name) => /\.(html|js|css)$/.test(name))) {
   const text = readFileSync(new URL(file, publicDir), "utf8");
@@ -60,6 +60,7 @@ assert.equal(run('t("nowPlaying")'), "กำลังเล่น");
 assert.equal(run('t("Now Playing")'), "Now Playing");
 assert.equal(run('t("Explore")'), "Explore");
 assert.equal(run('t("Up Next")'), "Up Next");
+assert.equal(run('t("videos")'), "วีดีโอ");
 const results = document.getElementById("results");
 const more = document.getElementById("more");
 const songs = (start, count) => Array.from({ length: count }, (_, i) => ({ videoId: `song${start + i}`, title: `Song ${start + i}`, channel: "Artist" }));
@@ -101,6 +102,7 @@ for (const page of ["guest", "admin"]) {
   }
   assert.doesNotMatch(html, /<select/);
   assert.deepEqual([...html.matchAll(/id="mode-(\w+)"/g)].map((match) => match[1]), ["videos", "karaoke", "songs"]);
+  assert.match(html, /id="mode-videos"[^>]+data-i18n="videos"/, `${page}: video button uses the shared label`);
   assert.match(html, /<section id="suggestions-section">/);
   assert.match(html, /id="shuffle" class="shuffle"/);
   assert.match(html, /id="singers" class="singers"/);
@@ -108,17 +110,24 @@ for (const page of ["guest", "admin"]) {
 }
 
 let calls = 0;
+const searchResults = songs(0, 12).reverse();
+const resultTitles = () => results.children.map((card) => card.querySelector(".r-title").textContent);
 context.fetch = async (url) => {
   calls++;
-  assert.equal(new URL(url, "http://localhost").searchParams.get("mode"), "videos", "First search uses default music-video mode");
-  return response(songs(0, 12));
+  const request = new URL(url, "http://localhost");
+  assert.equal(request.searchParams.get("mode"), "videos", "First search uses default video mode");
+  assert.equal(request.searchParams.get("q"), "test", "search passes the user's query unchanged");
+  return response(searchResults);
 };
 await run("doSearch('test')");
 assert.equal(results.children.length, 5);
+assert.deepEqual(resultTitles(), searchResults.slice(0, 5).map((item) => item.title));
 await run("loadMoreSongs()");
 assert.equal(results.children.length, 10);
+assert.deepEqual(resultTitles(), searchResults.slice(0, 10).map((item) => item.title));
 await run("loadMoreSongs()");
 assert.equal(results.children.length, 12);
+assert.deepEqual(resultTitles(), searchResults.map((item) => item.title), "paging preserves YouTube order");
 assert.equal(more.classList.contains("hidden"), true);
 assert.equal(calls, 1, "search pages reuse fetched results");
 
@@ -206,4 +215,4 @@ context.fetch = async (url, options) => {
   return { json: async () => ({ ok: true, position: 1 }) };
 };
 await run("requestSong({ videoId: 'song1', title: 'Test' }, document.createElement('button'))");
-console.log("PASS: Thai/English UI without Chinese or missing translations; nickname persistence/request attribution; five-song batches; deduplication; stale responses; search/queue tabs; songs/karaoke/music-video buttons.");
+console.log("PASS: Thai/English UI without Chinese or missing translations; nickname persistence/request attribution; five-song batches in search order; deduplication; stale responses; search/queue tabs; songs/karaoke/video buttons.");

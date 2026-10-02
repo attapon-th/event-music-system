@@ -6,8 +6,7 @@
 // Flow when a guest requests a song:
 //   1. guardrails       — cooldown, duplicate, queue cap
 //   2. checkPlayable()  — reject deleted/private/nonexistent videos
-//   3. moderate()       — optional LLM verdict for this event (fail-open)
-//   4. state.add()      — enqueue; broadcast to all clients over WebSocket
+//   3. state.add()      — enqueue; broadcast to all clients over WebSocket
 
 import { readFileSync, existsSync } from "node:fs";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -18,8 +17,7 @@ import express from "express";
 import { WebSocketServer } from "ws";
 import QRCode from "qrcode";
 
-import { searchYouTube, fetchChartHits, checkPlayable, fetchVideoDetails } from "./src/youtube.js";
-import { moderate, moderationConfigured } from "./src/moderation.js";
+import { searchYouTube, fetchChartHits, checkPlayable } from "./src/youtube.js";
 import { Sessions } from "./src/sessions.js";
 import { detectLanIp } from "./src/net.js";
 
@@ -47,9 +45,10 @@ const LAN_IP = detectLanIp(process.env.HOST_IP);
 const PUBLIC_BASE = (process.env.PUBLIC_URL || "").replace(/\/+$/, "");
 const GUEST_URL = PUBLIC_BASE ? `${PUBLIC_BASE}/guest` : `http://${LAN_IP}:${PORT}/guest`;
 const sessions = new Sessions({
-  filterOn: String(process.env.ENABLE_MODERATION || "").toLowerCase() === "true",
-  moderationMode: (process.env.MODERATION_MODE || "").toLowerCase() === "strict" ? "strict" : "default",
-  eventContext: process.env.EVENT_CONTEXT || "",
+  // AI is paused; retain legacy snapshot fields for existing clients.
+  filterOn: false,
+  moderationMode: "default",
+  eventContext: "",
   cooldownSeconds: 15,
 });
 
@@ -144,7 +143,7 @@ app.get("/api/info", requireMember, async (req, res) => {
     const qr = await QRCode.toDataURL(guestUrl, { width: 480, margin: 1 });
     res.set("Cache-Control", "no-store").json({ ...memberInfo(req.member), guestUrl, qr,
       filterOn: room.filterOn, moderationMode: room.moderationMode, primaryAdminId: room.primaryAdminId,
-      moderationConfigured: moderationConfigured(), defaultRegion: DEFAULT_REGION, defaultLocale: DEFAULT_LOCALE });
+      moderationConfigured: false, defaultRegion: DEFAULT_REGION, defaultLocale: DEFAULT_LOCALE });
   } catch {
     res.status(500).json({ error: "สร้าง QR ไม่สำเร็จ กรุณาลองใหม่" });
   }
@@ -216,7 +215,7 @@ app.get("/api/search", async (req, res) => {
 // Guest requests a song.
 app.post("/api/request", requireMember, async (req, res) => {
   const room = req.member.room;
-  const { state, cooldownSeconds, filterOn, moderationMode, eventContext, lastRequestAt } = room;
+  const { state, cooldownSeconds, lastRequestAt } = room;
   const { videoId, title, channel, duration, thumbnail, name, clientId } = req.body || {};
   if (typeof videoId !== "string" || !/^[A-Za-z0-9_-]{11}$/.test(videoId) ||
       typeof title !== "string" || !title.trim() || title.length > 500 ||
@@ -248,7 +247,7 @@ app.post("/api/request", requireMember, async (req, res) => {
 
   // Start the cooldown only now: the checks above are free and shouldn't lock
   // a guest out (e.g. after tapping a duplicate), but everything below hits
-  // YouTube and possibly the LLM — that's what the cooldown protects.
+  // YouTube — that's what the cooldown protects.
   lastRequestAt.set(floodKey, Date.now());
   pruneLastRequestAt(room);
 
@@ -256,19 +255,6 @@ app.post("/api/request", requireMember, async (req, res) => {
   const playable = await checkPlayable(videoId);
   if (!playable.ok) {
     return res.json({ ok: false, reason: playable.reason });
-  }
-
-  // 2. Filter (LLM moderation) — only when toggled on. Enriches with the video's
-  //    category / isFamilySafe / description, then asks the LLM. Fails open.
-  if (filterOn) {
-    const details = await fetchVideoDetails(videoId); // best-effort, may be null
-    const verdict = await moderate({ title, channel }, details, {
-      strict: moderationMode === "strict",
-      ...(eventContext ? { eventContext } : {}),
-    });
-    if (!verdict.approved) {
-      return res.json({ ok: false, reason: verdict.reason });
-    }
   }
 
   if (sessions.authenticate(req.member.token) !== req.member) {
@@ -279,7 +265,7 @@ app.post("/api/request", requireMember, async (req, res) => {
   if (state.has(videoId)) return res.json({ ok: false, reason: "เพลงนี้อยู่ในคิวแล้ว" });
   if (state.queue.length >= MAX_QUEUE_LENGTH) return res.json({ ok: false, reason: "คิวเพลงเต็ม กรุณาลองใหม่ภายหลัง" });
 
-  // 3. Enqueue.
+  // 2. Enqueue.
   const { item, position } = state.add({ videoId, title, channel, duration, thumbnail, addedBy: name });
   res.json({ ok: true, reason: "เพิ่มเข้าคิวแล้ว", position, id: item.id });
 });
@@ -418,8 +404,7 @@ wss.on("connection", (ws) => {
       }
       case "setFilter":
         if (typeof msg.on !== "boolean") break;
-        room.filterOn = msg.on;
-        if (msg.mode === "strict" || msg.mode === "default") room.moderationMode = msg.mode;
+        // Legacy clients receive the disabled state; AI stays paused.
         broadcastState(room);
         break;
       case "setCooldown": {

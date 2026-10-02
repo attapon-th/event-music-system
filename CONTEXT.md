@@ -57,13 +57,13 @@ _Avoid_: Owner, authenticated user.
 ### Songs and running order
 
 **Song**:
-A selected YouTube video offered as music for playback. Separate uploads of
+A selected YouTube video offered for playback, including music and other content. Separate uploads of
 the same recording are distinct selections.
 _Avoid_: Local audio file, album, playlist.
 
 **Song request**:
 A submission asking to play a song, subject to request limits, availability
-checks, and the content filter when enabled; acceptance creates a queue item.
+checks; acceptance creates a queue item.
 _Avoid_: Guaranteed playback, search result.
 
 **Queue item**:
@@ -109,12 +109,12 @@ or alongside a specific search. Its country preference does not limit song langu
 _Avoid_: Thai-only catalog, personal recommendations.
 
 **Request cooldown**:
-A waiting period between song-request attempts that require availability or
-content checks from a guest device. It is not the delay until a song will play.
+A waiting period between song-request attempts that require availability
+checks from a guest device. It is not the delay until a song will play.
 _Avoid_: Queue waiting time, playback delay.
 
 **Content filter**:
-An optional review of song suitability for the event; normal mode considers
+An inactive legacy review of song suitability for the event; normal mode considers
 the occasion, while strict mode requires family-friendly content.
 _Avoid_: Availability check, Thai-language filter.
 

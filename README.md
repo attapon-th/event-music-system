@@ -5,8 +5,7 @@
 **Turn any projector into a crowd-powered jukebox.**
 
 Guests scan a QR code, search YouTube from their phones, and queue songs.
-The music plays on the big screen — with an optional AI DJ that keeps requests
-fit for the occasion, whatever the occasion is.
+The music plays on the big screen, with a shared queue and live playback controls.
 
 [![Runtime: Bun](https://img.shields.io/badge/runtime-bun-f9f1e1?logo=bun&logoColor=black)](https://bun.sh)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -24,9 +23,7 @@ fit for the occasion, whatever the occasion is.
 Party playlists die in one of two ways: one person DJs all night, or an
 unmoderated queue fills with memes and worse. This is the middle path — every
 guest can add songs from their own phone in seconds (no app, no account), while
-the host keeps light-touch control: skip, remove, rate-limit, and an optional
-LLM filter that understands *"this is a school dinner"* vs *"this is a
-nightclub"* and judges requests accordingly.
+the host keeps light-touch control: skip, remove, and rate-limit.
 
 Built for a real graduation dinner in Hong Kong; designed to work for any event.
 
@@ -38,11 +35,6 @@ Built for a real graduation dinner in Hong Kong; designed to work for any event.
 - 🎤 **KTV-style explore** — genre tabs (K-pop, Cantopop, Mandopop, Western,
   party, Thai pop, classics) — Thailand charts load first (TH/th-TH) and singer chips with live, real results — guests who
   don't know what to pick just tap.
-- 🤖 **AI content filter (optional)** — any OpenAI-compatible LLM judges each
-  request against *your event*, enriched with the video's YouTube category,
-  family-safe flag, and description. Configure **off / on / strict** in `.env`.
-  Fails open on outages — moderation can never stop the
-  music.
 - 🎛 **Live controls** — play/pause/skip, volume and remove tracks on Player/Admin;
   per-guest request cooldown on Admin. Each room has independent settings, queue and playback, held only in memory.
 - 🔒 **Rooms** — three-digit codes and direct QR entry. `HOST_PASSWORD` creates rooms, only. The first Admin assigns/revokes Controller rights. Guest/Admin join by room number.
@@ -64,7 +56,7 @@ Built for a real graduation dinner in Hong Kong; designed to work for any event.
 git clone https://github.com/attapon-th/event-music-system.git
 cd event-music-system
 bun install
-cp .env.example .env      # set HOST_PASSWORD; the AI filter is off
+cp .env.example .env      # set HOST_PASSWORD
 bun start
 ```
 
@@ -97,9 +89,9 @@ press **เริ่มเล่น**, enter **รหัสสร้าง** (`H
 | `POST /api/sessions/join` | `{ code, sessionId? }` → Guest membership; reuses a valid member credential |
 | `POST /api/sessions/admin/claim` | First Guest claimant becomes the primary Admin |
 | `POST /api/sessions/close` | Player credential → delete room and disconnect everyone |
-| `GET /api/search?q=&mode=songs\|karaoke\|videos` | YouTube Music songs, karaoke or music videos (no API key) |
+| `GET /api/search?q=&mode=songs\|karaoke\|videos` | YouTube Music songs, karaoke or videos (no API key); video queries are unchanged and results keep YouTube order, including live and long videos |
 | `GET /api/browse?q=` | Cached, singles-only search behind the explore tabs |
-| `POST /api/request` | Room member credential → guardrails → playability check → (optional AI filter) → enqueue |
+| `POST /api/request` | Room member credential → guardrails → playability check → enqueue |
 | WebSocket `/` | Authenticate first; room-scoped state and authorized controls |
 
 The **server owns a queue per room** (`src/state.js`, `src/sessions.js`). The
@@ -114,54 +106,37 @@ Application stdout contains only JSON `created` / `deleted` records with `at`,
 `data/settings.json` is ignored and the Compose settings volume is removed.
 
 Request pipeline: flood control → duplicate/cap checks → oEmbed playability
-check → optional LLM verdict → enqueue. Embed-disabled or region-locked videos
+check → enqueue. Embed-disabled or region-locked videos
 that slip through are auto-skipped by the player (iframe error codes + a 20s
 never-started watchdog).
 
-## The AI filter
+## AI paused
 
-Off by default; cycle it from the host page (🛡 過濾 pill): **off → on →
-strict**. It works with any **OpenAI-compatible** chat API — OpenRouter,
-Kimi/Moonshot, DeepSeek, GLM… swap providers by changing three `.env` values,
-no code changes:
+AI moderation is disabled and outside the current development scope. The server
+does not call an LLM or fetch moderation metadata when adding a request, even if
+legacy AI environment settings are present. `setFilter` cannot enable it.
 
-```ini
-LLM_API_KEY=sk-...
-LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_MODEL=deepseek/deepseek-v4-flash
-```
-
-Verify a key and list models with `bun run check-llm`.
-
-**Context-aware, not puritanical.** Tell it what the event is (場景 button on
-the host page — e.g. *"a wedding banquet"*, *"a nightclub party"*) and it sets
-the bar accordingly: explicit mainstream tracks pass at a club but not at a
-school dinner; national anthems and protest songs get caught at ordinary social
-events. **Strict** mode ignores the venue and allows family-friendly music only.
-
-Failure design worth knowing:
-
-- **Fails open** on infrastructure problems (no key, HTTP error, network error) — an
-  outage never stops the party.
-- **Fails closed on timeout** with a retryable Thai message.
-- **Fails closed** when the model answers but dodges the question (provider
-  content-filter, no structured verdict) — evasion is treated as a rejection.
-
-> The filter reads title, channel, category, and description — not the audio.
-> By default it catches non-music and explicit metadata, not explicit lyrics
-> hidden under a clean title. On OpenRouter, set `LLM_WEB_SEARCH=true` to close
-> that gap: the model web-searches each song and judges the actual lyrics
-> (~$0.005 per moderated request, a few seconds slower).
+The moderation module and standalone diagnostic script remain for future work.
+Legacy API fields are retained for compatibility: `filterOn` and
+`moderationConfigured` report `false`; `moderationMode` remains `default`.
+Event context is retained as inert metadata, with an empty initial value.
 
 ## Run on a home server (Docker + reverse proxy)
 
-The server builds the image itself from source — no registry, no logins:
+Compose builds the image from source and tags it as `attap0n/qp:latest`:
 
 ```bash
 git clone https://github.com/attapon-th/event-music-system.git
 cd event-music-system
 cp .env.example .env          # set PUBLIC_URL to your domain, HOST_PASSWORD too
 docker compose up -d --build
+```
+
+To use the published Docker Hub image instead of building locally:
+
+```bash
+docker compose pull
+docker compose up -d --no-build
 ```
 
 The container joins the external `reverseproxy` Docker network and exposes port
@@ -220,20 +195,18 @@ commented list). The highlights:
 | `HOST_PASSWORD` | Creation password; empty disables new rooms |
 | `DEFAULT_REGION` | YouTube search/chart country, fallback `TH` |
 | `DEFAULT_LOCALE` | YouTube language/locale, fallback `th-TH` |
-| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | Any OpenAI-compatible provider for the filter |
-| `EVENT_CONTEXT` | Initial event description for the AI |
 | `PORT` | Listen port (default `45416`) |
 
 Cooldown is editable from Admin/Controller, with its value shown on the button.
-Filter state, moderation mode and event context start from `.env`; their UI controls
-are removed or hidden. Each room's runtime changes last only for that Session.
+AI environment settings are inactive while AI is paused. Each room's runtime
+changes last only for that Session.
 
 ## Project layout
 
 ```
 server.js                  Express + room-scoped WebSocket API and request pipeline
 src/youtube.js             No-key search scraping, oEmbed check, watch-page details
-src/moderation.js          LLM content filter (OpenAI-compatible, fail-open)
+src/moderation.js          Retained LLM content filter (paused; unused by the server)
 src/state.js               Authoritative in-memory queue
 src/sessions.js            Room lifecycle and credentials
 src/net.js                 LAN IP detection
@@ -243,7 +216,7 @@ public/admin.*             Authorized room controls and queue drag/drop
 public/session.*           Shared entry forms, credentials and reconnects
 public/i18n.js             Shared Thai UI dictionary + interpolation
 scripts/test.mjs           HTTP/WebSocket integration checks (isolated temporary server)
-scripts/check-llm.mjs      Verify LLM key + list models
+scripts/check-llm.mjs      Retained standalone LLM diagnostic (outside current development)
 Dockerfile                 Bun-based image
 docker-compose.yml         Home-server deployment (builds locally)
 update.sh                  Cron alternative: pull + rebuild if changed
@@ -288,12 +261,14 @@ Player ซ่อน/แสดงการ์ด QR ได้ และแสด�
 
 หน้า Host ใช้ลูกศรรีโมตเลือกปุ่มและกด **OK/Enter** ได้ (ปุ่มเล่น/หยุดถูกเลือกไว้แล้ว)
 ปรับเสียงด้วยซ้าย/ขวาขณะเลือกแถบเสียง ใช้ขึ้น/ลงเพื่อออกจากแถบเสียง
-ปุ่มมุมขวาบนวิดีโอหรือ **F** เปิดวิดีโอเต็มจอ กด **OK** ที่ปุ่มเดิมหรือ **Back/Esc** เพื่อกลับ layout เดิม
+ปุ่มมุมขวาบนวิดีโอหรือ **F** เปิดวิดีโอเต็มจอ ปุ่มนี้ซ่อนขณะเต็มจอ
+กด **Back/Esc**, Back บนรีโมต TV หรือปุ่มย้อนกลับของ browser เพื่อกลับหน้า Player ปกติในห้องเดิม
 Browser ที่ไม่มี Fullscreen API จะขยายวิดีโอเต็มพื้นที่หน้าเว็บแทน รองรับปุ่มสื่อเล่น/หยุดและข้ามเพลงด้วย
 Guest แยก **ค้นหาเพลง** และ **คิวเพลง** เป็นคนละแท็บ; หน้า `/a` เพิ่มแท็บผู้เข้าร่วม โดยคิวยังอัปเดตสดขณะอยู่แท็บค้นหา
-กดปุ่มโหมด **วิดีโอเพลง / คาราโอเกะ / เพลง** ได้ในแท็บค้นหา โดย Guest/Admin เริ่มต้นที่ **วิดีโอเพลง**: เพลงใช้ YouTube Music หมวด Songs
+กดปุ่มโหมด **วีดีโอ / คาราโอเกะ / เพลง** ได้ในแท็บค้นหา โดย Guest/Admin เริ่มต้นที่ **วีดีโอ**: เพลงใช้ YouTube Music หมวด Songs
 ส่วนคาราโอเกะใช้วิดีโอ YouTube และเติมคำว่า `karaoke` หากคำค้นยังไม่มีคำนี้หรือ “คาราโอเกะ”
-วิดีโอเพลงค้นหาวิดีโอ YouTube โดยเติม `official music video` หากยังไม่ได้ระบุในคำค้น
+วีดีโอส่งคำค้นเดิมไป YouTube โดยไม่เติมคำ ไม่กรองเนื้อหาหรือความยาว รวมไลฟ์และวิดีโอยาว และแสดงตามลำดับที่ YouTube ส่งกลับ โดยรับเฉพาะวิดีโอ ไม่รวมช่องหรือเพลย์ลิสต์
+เพลงแนะนำ/หมวด/ศิลปินยังตัดรายการที่ไม่ทราบความยาวหรือยาวเกิน 10 นาที และสุ่มลำดับเหมือนเดิม
 Guest และ Admin มีเพลงแนะนำ หมวดเพลง ปุ่มศิลปิน และปุ่มสุ่มเหมือนกัน ใช้โหมดที่เลือกด้วย ทุกโหมดเพิ่มเข้าคิวของห้องเดียวกันและเล่นบน Player ของห้องนั้น
 `/api/search` และ `/api/browse` รองรับ `mode=songs` (ค่าเริ่มต้น) หรือ `mode=karaoke` / `mode=videos`
 
@@ -379,7 +354,8 @@ refresh/reconnect, สิทธิ์ผู้ใช้/กรณีไม่ต
     `docker compose up -d --build` (ต้องมี network `reverseproxy` เดิม)
 11. บน TV Box ตรวจเริ่มเล่นอัตโนมัติ; หาก browser บล็อกเสียง ใช้ปุ่มเล่นเดิม
     เลื่อนด้วยลูกศรไปเล่น/ข้าม/เสียง/ลบเพลง
-    กรอบโฟกัสต้องเห็นชัดและยังอยู่เมื่อคิวอัปเดต เข้าเต็มจอแล้วกด Back หรือ OK เพื่อออก
+    กรอบโฟกัสต้องเห็นชัดและยังอยู่เมื่อคิวอัปเดต เข้าเต็มจอแล้วปุ่มเต็มจอต้องซ่อน
+    กด Back บน browser/รีโมต หรือ Esc เพื่อกลับ Player โดยห้องยังอยู่และเพลงยังเล่นต่อ
     ตรวจว่าภาพกับเสียงเล่นต่อและ layout ปกติกลับมาเหมือนเดิม
 
 YouTube IFrame อาจจำกัด autoplay/การฝังหรือการเล่นตามประเทศ ต้องตรวจเสียงจริงบน TV/TV Box

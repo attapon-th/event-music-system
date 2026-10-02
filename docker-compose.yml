@@ -1,5 +1,6 @@
 services:
   event-music:
+    image: attap0n/qp:latest
     build: .
     container_name: event-music
     restart: unless-stopped

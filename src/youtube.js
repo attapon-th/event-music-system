@@ -1,7 +1,7 @@
 // YouTube access without an API key:
 //  - searchYouTube(): queries YouTube Music's internal search API (InnerTube,
 //    the same JSON endpoint the music.youtube.com web app calls), filtered to
-//    the "Songs" category, or regular YouTube videos for karaoke/music videos;
+//    the "Songs" category, or regular YouTube videos for karaoke/video search;
 //    the returned videoIds play in the regular YouTube iframe as usual.
 //  - checkPlayable(): uses the oEmbed endpoint to reject deleted/private videos
 //    before they reach the queue. (Embed-disabled videos still return 200 here,
@@ -33,7 +33,6 @@ export async function searchYouTube(query, { limit = 12, timeoutMs = 8000, regio
   const karaoke = mode === "karaoke";
   const videos = mode !== "songs";
   if (karaoke && !/karaoke|คาราโอเกะ/i.test(query)) query += " karaoke";
-  if (mode === "videos" && !/music video|official mv|m\/v|วิดีโอเพลง/i.test(query)) query += " official music video";
   const origin = videos ? "https://www.youtube.com" : "https://music.youtube.com";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -68,12 +67,12 @@ export async function searchYouTube(query, { limit = 12, timeoutMs = 8000, regio
     for (const section of sections) {
       for (const item of section.itemSectionRenderer?.contents || []) {
         const r = item.videoRenderer;
-        if (!r?.videoId || !r.lengthText) continue; // exclude live streams
+        if (!r?.videoId || (karaoke && !r.lengthText)) continue;
         results.push({
           videoId: r.videoId,
           title: r.title?.runs?.map((run) => run.text).join("") || r.title?.simpleText || "(untitled)",
           channel: (r.ownerText || r.shortBylineText)?.runs?.map((run) => run.text).join("") || "Unknown",
-          duration: r.lengthText.simpleText || r.lengthText.runs?.map((run) => run.text).join("") || "",
+          duration: r.lengthText?.simpleText || r.lengthText?.runs?.map((run) => run.text).join("") || "",
           thumbnail: pickThumbnail(r.thumbnail?.thumbnails),
         });
         if (results.length >= limit) return results;
