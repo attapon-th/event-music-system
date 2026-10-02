@@ -26,6 +26,4 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 #participants-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 #participants-list span { overflow-wrap: anywhere; }
 #participants-list button { min-width: 44px; min-height: 44px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px; background: var(--fill); color: var(--text); }
-#admin-settings { color: var(--warm); margin-top: 12px; }
-
-.admin-controls button[aria-pressed="true"] { color: var(--gold); border-color: var(--gold); }
+#admin-cooldown { display: inline-flex; align-items: center; gap: 8px; font: 600 14px/1.4 var(--sans); }

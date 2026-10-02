@@ -300,6 +300,7 @@ const ADMIN_PAGE = versionedPage("admin.html");
 app.get("/a", (_req, res) => res.set("Cache-Control", "no-cache").type("html").send(ADMIN_PAGE));
 app.get(["/admin", "/admin.html"], (req, res) => res.redirect(302, req.originalUrl.replace(/^\/admin(?:\.html)?/, "/a")));
 app.get(["/", "/host.html"], (_req, res) => res.set("Cache-Control", "no-cache").type("html").send(HOST_PAGE));
+app.get("/g", (req, res) => res.redirect(302, req.originalUrl.replace(/^\/g\/?(?=\?|$)/i, "/guest")));
 app.get(["/guest", "/guest.html", "/explore"], (_req, res) => res.set("Cache-Control", "no-cache").type("html").send(GUEST_PAGE));
 
 app.use(express.static(path.join(__dirname, "public"), {

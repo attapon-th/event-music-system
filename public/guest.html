@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title data-i18n="Add a Song — Event Music">เพิ่มเพลง — ระบบเพลงส่วนกลาง</title>
+  <title data-i18n="Add a Song — Event Music">เพิ่มเพลง — คิวเพลิน</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -14,7 +14,6 @@
   <div id="room-content" hidden>
   <header>
     <h1 id="request-title">เพิ่มเพลง</h1>
-    <div class="h-sub" data-i18n="Add a Song">Add a Song</div>
     <button id="claim-admin" type="button" class="more" hidden data-i18n="claimAdmin">รับสิทธิ์ Admin</button>
     <p id="claim-error" role="status" aria-live="polite" hidden></p>
   </header>
@@ -22,8 +21,8 @@
   <div id="now-playing" class="now-playing hidden"></div>
 
   <div class="page-tabs" role="tablist" aria-label="ค้นหาและคิวเพลง">
-    <button id="search-tab" type="button" role="tab" aria-selected="true" aria-controls="search-panel" data-i18n="Search"></button>
-    <button id="queue-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-panel" tabindex="-1" data-i18n="queue"></button>
+    <button id="search-tab" type="button" role="tab" aria-selected="true" aria-controls="search-panel"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m15.1 15.1 4.4 4.4"/></svg><span data-i18n="Search"></span></button>
+    <button id="queue-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-panel" tabindex="-1"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h12"/></svg><span data-i18n="queue"></span></button>
   </div>
 
   <section id="search-panel" role="tabpanel" aria-labelledby="search-tab">

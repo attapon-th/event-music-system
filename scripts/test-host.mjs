@@ -112,6 +112,8 @@ for (const earlyReady of [false, true]) {
   assert.equal(document.activeElement.id, "playpause");
   assert.equal(calls.filter(([action]) => action === "init").length, 1, `API ready ${earlyReady ? "before" : "after"} Host script: initialize one player`);
   assert.ok(calls.some(([action, id]) => action === "load" && id === "song0000001"), "Auto start must load the current song");
+  const firstLoad = calls.findIndex(([action]) => action === "load");
+  assert.deepEqual(calls[firstLoad - 1], ["volume", 37], "Apply room volume before loading its first song");
   assert.equal(state, 1, "Auto start must play the current song");
   runInContext("latestState.paused = true; syncPlayer();", context);
   assert.equal(state, 2);

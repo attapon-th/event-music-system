@@ -138,11 +138,18 @@ async function request(videoId, clientId = videoId) {
 try {
   start("test-password");
   await ready();
-  for (const path of ["/", "/host.html", "/a", "/admin", "/admin.html", "/guest", "/explore"]) {
+  for (const path of ["/", "/host.html", "/a", "/admin", "/admin.html", "/guest", "/g", "/explore"]) {
     assert.equal((await fetch(base + path)).status, 200, path);
   }
   const oldAdmin = await fetch(base + "/admin?room=123&session=test", { redirect: "manual" });
   assert.equal(oldAdmin.headers.get("location"), "/a?room=123&session=test");
+  for (const shortcut of ["/g", "/g/", "/G"]) {
+    for (const query of ["", "?room=123&session=test"]) {
+      const shortGuest = await fetch(base + shortcut + query, { redirect: "manual" });
+      assert.equal(shortGuest.status, 302);
+      assert.equal(shortGuest.headers.get("location"), "/guest" + query, "Guest shortcut preserves room and session identity");
+    }
+  }
   assert.equal((await fetch(base + "/api/host-token")).status, 404);
   assert.equal((await fetch(base + "/api/info")).status, 401);
   assert.equal((await post("/api/sessions", { password: "wrong" })).status, 401);
@@ -237,7 +244,7 @@ try {
   assert.equal(otherRoom.messages.at(-1).cooldownSeconds, 15, "settings are room-scoped");
   assert.equal("participants" in otherRoom.messages.at(-1), false, "Guest cannot read the participant roster");
   assert.equal(otherRoom.snapshot.queue.length, 0);
-  assert.equal(otherRoom.snapshot.volume, 100);
+  assert.equal(otherRoom.snapshot.volume, 60);
   assert.equal(otherPlayer.snapshot.nowPlaying.videoId, "song0000001");
   const ids = admin.snapshot.queue.map((s) => s.id).reverse();
   send(admin, "reorder", { ids });
@@ -254,7 +261,7 @@ try {
   await sync((s) => s.paused);
   send(admin, "setVolume", { volume: 37 });
   await sync((s) => s.volume === 37);
-  assert.equal(otherRoom.snapshot.volume, 100);
+  assert.equal(otherRoom.snapshot.volume, 60);
   send(admin, "play");
   await sync((s) => !s.paused);
   const refresh = await socket(adminToken);
@@ -352,6 +359,7 @@ try {
   await waitFor(() => noPasswordGuest.messages.some((msg) => msg.type === "error"));
   // State edge cases: stale completion after idle, invalid volume, empty permutations.
   const state = new JukeboxState();
+  assert.equal(state.snapshot().volume, 60, "new rooms start at 60% volume");
   let changes = 0;
   state.onChange = () => changes++;
   state.advance("stale-video");

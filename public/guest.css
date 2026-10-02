@@ -74,7 +74,7 @@ h2#request-title { margin-top: 22px; font: 700 22px/1.4 var(--serif); }
   background: var(--fill);
   border: 1px solid var(--line);
   padding: 0 16px;
-  font: 400 14.5px/1 var(--sans);
+  font: 400 16px/1 var(--sans);
   color: var(--text);
 }
 #q::placeholder { color: var(--faint); }
@@ -221,8 +221,9 @@ h2#request-title { margin-top: 22px; font: 700 22px/1.4 var(--serif); }
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  overflow-wrap: anywhere;
 }
-.r-sub { font: 400 12.5px/1.3 var(--sans); color: var(--muted); margin-top: 4px; }
+.r-sub { font: 400 12.5px/1.3 var(--sans); color: var(--muted); margin-top: 4px; overflow-wrap: anywhere; }
 .add-btn {
   width: 34px;
   height: 34px;
@@ -315,7 +316,7 @@ h2#request-title { margin-top: 22px; font: 700 22px/1.4 var(--serif); }
   letter-spacing: 0.06em;
 }
 .np-title { font: 600 15px/1.3 var(--sans); color: oklch(95% 0.012 85); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.np-sub { font: 400 12px/1.3 var(--sans); color: oklch(60% 0.025 320); }
+.np-sub { font: 400 12px/1.3 var(--sans); color: oklch(60% 0.025 320); overflow-wrap: anywhere; }
 
 .eq { display: flex; align-items: flex-end; gap: 1.5px; height: 9px; }
 .eq span { width: 2.2px; background: var(--gold); border-radius: 1px; display: inline-block; }
@@ -329,7 +330,7 @@ h2#request-title { margin-top: 22px; font: 700 22px/1.4 var(--serif); }
 .q-text { min-width: 0; flex: 1; }
 .q-text .t-row { display: flex; align-items: center; gap: 7px; }
 .q-text .t { font: 600 15px/1.3 var(--sans); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.q-text .s { font: 400 12px/1.3 var(--sans); color: var(--muted); }
+.q-text .s { font: 400 12px/1.3 var(--sans); color: var(--muted); overflow-wrap: anywhere; }
 .q-you {
   flex-shrink: 0;
   background: var(--gold);
@@ -425,11 +426,14 @@ h2#request-title { margin-top: 22px; font: 700 22px/1.4 var(--serif); }
 }
 
 /* Shared Guest/Admin discovery and queue tabs. */
-.page-tabs { display: flex; gap: 24px; margin-top: 22px; border-bottom: 1px solid var(--line); }
+.page-tabs { display: flex; gap: 12px; margin-top: 22px; border-bottom: 1px solid var(--line); }
 .page-tabs button {
   position: relative; flex: 1; min-width: 0; min-height: 64px; padding: 16px 8px; border: 0;
   background: transparent; color: var(--muted); font: 700 22px/1.4 var(--sans); cursor: pointer;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px;
 }
+.page-tabs svg { flex-shrink: 0; }
+.page-tabs span { min-width: 0; overflow-wrap: anywhere; }
 .page-tabs button:hover { color: var(--text); }
 .page-tabs button[aria-selected="true"] { color: var(--gold); }
 .page-tabs button[aria-selected="true"]::after {
@@ -443,3 +447,4 @@ h2#request-title { margin-top: 22px; font: 700 22px/1.4 var(--serif); }
 }
 .search-modes button:hover { background: var(--fill-hover); color: var(--text); }
 .search-modes button[aria-pressed="true"] { background: var(--card); border-color: var(--line); color: var(--gold); }
+@media (max-width: 600px) { .page-tabs button { font-size: 16px; } }

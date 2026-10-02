@@ -12,7 +12,7 @@ export class JukeboxState {
     this.nowPlaying = null; // current item or null
     this.queue = []; // upcoming items
     this.paused = false;
-    this.volume = 100;
+    this.volume = 60;
     this.history = []; // played items (most recent last), capped
     this.onChange = () => {};
   }

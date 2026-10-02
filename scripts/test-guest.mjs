@@ -69,8 +69,8 @@ assert.equal(run("NICKNAMES.length"), 100);
 assert.equal(run("new Set(NICKNAMES).size"), 100);
 const nickname = storage.get("guestNickname");
 assert.equal(run("NICKNAMES.includes(nickname)"), true);
-assert.equal(document.getElementById("request-title").textContent, `เพิ่มเพลง โดย ${nickname}`);
-assert.equal(document.title, `เพิ่มเพลง โดย ${nickname}`);
+assert.equal(document.getElementById("request-title").textContent, `Music by ${nickname}`);
+assert.equal(document.title, `Music by ${nickname}`);
 const reloadElements = new Map();
 const reloadDocument = { ...document, getElementById(id) {
   if (!reloadElements.has(id)) reloadElements.set(id, element());

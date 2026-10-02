@@ -1,4 +1,4 @@
-# Event Music System
+# คิวเพลิน
 
 Independent jukebox sessions for events or venues: guests choose songs, an admin manages
 the running order, and a designated player supplies music to the venue.

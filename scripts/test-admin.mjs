@@ -48,13 +48,18 @@ list.children[2].children[1].onclick();
 assert.deepEqual(sent.at(-1), { type: "setParticipantRole", id: "guest", enabled: true });
 list.children[3].children[1].onclick();
 assert.deepEqual(sent.at(-1), { type: "setParticipantRole", id: "helper", enabled: false });
-node("admin-filter").onclick();
-assert.deepEqual(sent.at(-1), { type: "setFilter", on: true, mode: "default" });
+assert.equal(node("admin-cooldown-label").textContent, "เวลารอ: 15 วินาที");
 node("admin-cooldown").onclick();
 assert.deepEqual(sent.at(-1), { type: "setCooldown", seconds: 30 });
 handlers.onState({ state, code: "123", memberId: "helper", primaryAdminId: "owner", role: "controller", participants,
   filterOn: true, moderationMode: "default", cooldownSeconds: 30 });
 assert.ok(list.children.every(row => row.children.length === 1), "Controller has no grant/revoke UI");
-node("admin-filter").onclick();
-assert.deepEqual(sent.at(-1), { type: "setFilter", on: true, mode: "strict" });
-console.log("PASS: Admin/Controller roster, online/offline names, primary-only role controls, filter/cooldown (DOM simulated).");
+assert.equal(node("admin-cooldown-label").textContent, "เวลารอ: 30 วินาที", "button label follows the authoritative room snapshot");
+handlers.onState({ state, code: "123", memberId: "helper", primaryAdminId: "owner", role: "controller", participants,
+  cooldownSeconds: 60 });
+node("admin-cooldown").onclick();
+assert.deepEqual(sent.at(-1), { type: "setCooldown", seconds: 0 });
+handlers.onState({ state, code: "123", memberId: "helper", primaryAdminId: "owner", role: "controller", participants,
+  cooldownSeconds: 0 });
+assert.equal(node("admin-cooldown-label").textContent, "เวลารอ: 0 วินาที");
+console.log("PASS: Admin/Controller roster, online/offline names, primary-only role controls, cooldown button labels (DOM simulated).");

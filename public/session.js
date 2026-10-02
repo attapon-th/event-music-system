@@ -9,15 +9,20 @@ const Room = (() => {
   let retry = null;
   let stopped = false;
   const panel = document.createElement("section");
-  panel.className = "session-panel";
+  panel.className = `session-panel${screen === "player" ? " player-entry" : ""}`;
   panel.innerHTML = `
     <p id="room-error" role="status" aria-live="polite"></p>
-    <form id="room-create" ${screen === "player" ? "" : "hidden"}>
+    <div id="room-welcome" class="start-card" ${screen === "player" ? "" : "hidden"}>
+      <div class="start-logo" aria-hidden="true">🎶</div>
       <h1>${t("Event Music System")}</h1>
-      <h2>${t("createRoom")}</h2>
-      <label>${t("creationPassword")} <input id="create-password" type="password" autocomplete="current-password" required></label>
-      <button type="submit">${t("createAndPlay")}</button>
-    </form>
+      <p id="start-prompt">${t("Click to start the jukebox.")}</p>
+      <button id="start-btn" type="button">${t("▶  Start")}</button>
+      <form id="room-create" hidden>
+        <input id="create-password" type="password" placeholder="${t("creationPassword")}" aria-label="${t("creationPassword")}" autocomplete="current-password" required>
+        <button type="submit" title="${t("next")}" aria-label="${t("next")}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 12h16m-7-7 7 7-7 7"/></svg></button>
+      </form>
+      <small>${t("Make sure this window's audio goes to the venue's AV system.")}</small>
+    </div>
     <form id="room-join" ${screen === "player" ? "hidden" : ""}>
       <h2>${t("joinRoom")}</h2>
       <label>${t("roomNumber")} <input id="room-code" type="text" inputmode="numeric" pattern="[1-9][0-9]{2}" maxlength="3" autocomplete="off" required></label>
@@ -25,6 +30,15 @@ const Room = (() => {
     </form>`;
   document.body.prepend(panel);
   const node = (id) => document.getElementById(id);
+  if (screen === "player") {
+    node("start-btn").onclick = () => {
+      node("start-btn").hidden = true;
+      node("start-prompt").hidden = true;
+      node("room-create").hidden = false;
+      node("create-password").focus();
+    };
+    node("start-btn").focus();
+  }
   if (content) content.hidden = true;
   document.body.dataset.roomActive = "false";
   node("room-code").value = params.get("room") || "";
@@ -73,6 +87,13 @@ const Room = (() => {
     panel.hidden = false;
     document.body.dataset.roomActive = "false";
     if (content) content.hidden = true;
+    if (screen === "player") {
+      node("room-create").hidden = true;
+      node("create-password").value = "";
+      node("start-btn").hidden = false;
+      node("start-prompt").hidden = false;
+      node("start-btn").focus();
+    }
     const claim = node("claim-admin");
     if (claim) claim.hidden = true;
     node("room-error").textContent = message;

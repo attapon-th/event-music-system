@@ -93,6 +93,9 @@ window.onYouTubeIframeAPIReady = function () {
 // Make the player match whatever the server says is now playing.
 function syncPlayer() {
   if (!started || !playerReady) return;
+  player.setVolume(latestState.volume ?? 60);
+  document.getElementById("volume").value = latestState.volume ?? 60;
+  document.getElementById("volume").style.setProperty("--vol", `${latestState.volume ?? 60}%`);
   const np = latestState.nowPlaying;
   const idle = document.getElementById("idle");
 
@@ -112,9 +115,6 @@ function syncPlayer() {
     player.loadVideoById(np.videoId);
     armPlaybackWatchdog(np.videoId);
   }
-  player.setVolume(latestState.volume ?? 100);
-  document.getElementById("volume").value = latestState.volume ?? 100;
-  document.getElementById("volume").style.setProperty("--vol", `${latestState.volume ?? 100}%`);
   if (appliedPaused !== !!latestState.paused) {
     appliedPaused = !!latestState.paused;
     playbackTarget = appliedPaused;
@@ -363,7 +363,7 @@ function openPlayer() {
   document.getElementById("qr-toggle").setAttribute("aria-pressed", "false");
   currentVideoId = null;
   appliedPaused = null;
-  latestState = { nowPlaying: null, queue: [], paused: false, volume: 100 };
+  latestState = { nowPlaying: null, queue: [], paused: false, volume: 60 };
   loadInfo();
   connectWs();
   document.getElementById("playpause").focus();

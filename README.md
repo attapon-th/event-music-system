@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎶 Event Music System
+# 🎶 คิวเพลิน
 
 **Turn any projector into a crowd-powered jukebox.**
 
@@ -40,12 +40,11 @@ Built for a real graduation dinner in Hong Kong; designed to work for any event.
   don't know what to pick just tap.
 - 🤖 **AI content filter (optional)** — any OpenAI-compatible LLM judges each
   request against *your event*, enriched with the video's YouTube category,
-  family-safe flag, and description. Three modes cycled from the host page:
-  **off / on / strict**. Fails open on outages — moderation can never stop the
+  family-safe flag, and description. Configure **off / on / strict** in `.env`.
+  Fails open on outages — moderation can never stop the
   music.
-- 🎛 **Host controls, live** — play/pause/skip, volume, remove tracks, per-guest
-  request cooldown, filter mode, and the event description fed to the AI — all
-  from the projected page. Each room has independent settings, queue and playback, held only in memory.
+- 🎛 **Live controls** — play/pause/skip, volume and remove tracks on Player/Admin;
+  per-guest request cooldown on Admin. Each room has independent settings, queue and playback, held only in memory.
 - 🔒 **Rooms** — three-digit codes and direct QR entry. `HOST_PASSWORD` creates rooms, only. The first Admin assigns/revokes Controller rights. Guest/Admin join by room number.
 - 🛡 **Queue guardrails** — duplicate rejection, per-phone cooldown (works
   behind venue NAT), 50-song cap, playability pre-check, and a watchdog that
@@ -70,7 +69,7 @@ bun start
 ```
 
 Open **http://localhost:45416/** on the machine, drag it to the projector, and
-create a room using **รหัสสร้าง** (`HOST_PASSWORD`); the Player opens immediately. If the browser blocks audio, use its existing play button. Guests scan the on-screen QR or enter its three-digit code.
+press **เริ่มเล่น**, enter **รหัสสร้าง** (`HOST_PASSWORD`) and press the arrow icon; the Player opens after creation. New rooms start at **60% volume**. If the browser blocks audio, use its existing play button. Guests scan the on-screen QR or enter its three-digit code.
 
 > Node ≥ 20 works too (`npm install && npm start`), but Bun is what the Docker
 > image and scripts use.
@@ -93,6 +92,7 @@ create a room using **รหัสสร้าง** (`HOST_PASSWORD`); the Playe
 | `/guest` | Mobile page guests open via the QR |
 | `/explore` | Alias of the Guest page with Thailand charts on first load |
 | `/a` | Admin/Controller controls, queue editing and participant roster |
+| `/g` | Redirect to `/guest`, preserving room/session query parameters |
 | `POST /api/sessions` | `{ password }` → new room and Player credential |
 | `POST /api/sessions/join` | `{ code, sessionId? }` → Guest membership; reuses a valid member credential |
 | `POST /api/sessions/admin/claim` | First Guest claimant becomes the primary Admin |
@@ -221,12 +221,12 @@ commented list). The highlights:
 | `DEFAULT_REGION` | YouTube search/chart country, fallback `TH` |
 | `DEFAULT_LOCALE` | YouTube language/locale, fallback `th-TH` |
 | `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | Any OpenAI-compatible provider for the filter |
-| `EVENT_CONTEXT` | Initial event description for the AI (editable live) |
+| `EVENT_CONTEXT` | Initial event description for the AI |
 | `PORT` | Listen port (default `45416`) |
 
-Filter state, moderation mode, and cooldown are editable from Admin/Controller;
-event context is editable from Player. `.env` seeds each new room; changes last
-only for that Session.
+Cooldown is editable from Admin/Controller, with its value shown on the button.
+Filter state, moderation mode and event context start from `.env`; their UI controls
+are removed or hidden. Each room's runtime changes last only for that Session.
 
 ## Project layout
 
@@ -252,7 +252,7 @@ update.sh                  Cron alternative: pull + rebuild if changed
 No frameworks, no build step, three dependencies (`express`, `ws`, `qrcode`).
 
 
-## ใช้งานระบบเพลงส่วนกลาง
+## ใช้งานคิวเพลิน
 
 ตั้งค่าใน `.env` ก่อนเปิด Player/Admin:
 
@@ -262,8 +262,9 @@ DEFAULT_REGION=TH
 DEFAULT_LOCALE=th-TH
 ```
 
-เปิด `/` บน TV/TV Box กรอก **รหัสสร้าง** (`HOST_PASSWORD`) เพื่อสร้างห้องใหม่เท่านั้น
-เมื่อสร้างสำเร็จ Player เปิดและเริ่มเล่นอัตโนมัติ ไม่มีหน้าเริ่มเล่นแยก
+เปิด `/` บน TV/TV Box จะเห็นหน้าเริ่มเดิม กด **เริ่มเล่น** จึงแสดงช่อง **รหัสสร้าง** (`HOST_PASSWORD`)
+ช่องรหัสไม่มี label เพิ่ม ใช้ placeholder และปุ่มไอคอนลูกศรต่อไปเพื่อสร้างห้องใหม่
+เมื่อสร้างสำเร็จ Player เปิดทันที ห้องใหม่เริ่มที่ระดับเสียง **60%**
 หาก browser บล็อกเสียง ให้กดปุ่มเล่นเดิม; ระบบไม่ข้ามเพลงเพราะถูกบล็อก autoplay
 ห้องมีเลข 3 หลัก (`100–999`) และ QR ผู้ฟัง scan QR เข้าห้องทันที
 หรือเปิด `/guest` กรอกเลขห้องโดยไม่ต้องเลือกบทบาท ไม่มีการรับช่วง Player ห้องเดิม
@@ -276,8 +277,9 @@ Controller ควบคุมเพลงและการตั้งค่า
 ชื่อเล่นใช้แสดงผลเท่านั้น สิทธิ์ตรวจด้วยกุญแจที่ server ออกให้
 
 Player ซ่อน/แสดงการ์ด QR ได้ และแสดงใต้ QR เป็น `ห้อง {rn} · yt1.lkzlab.uk/guest`
-ตัวกรองกับเวลารออยู่ในหน้า `/a` ปุ่ม **ออก** ถัดจากประเภทงานปิดห้องทันที
-และพาทุกคนกลับฟอร์มเลขห้อง (Player กลับฟอร์มสร้างห้องใหม่)
+ปุ่มประเภทงานบน Player ซ่อนไว้ หน้า `/a` ไม่มีปุ่มตัวกรองและซ่อนปุ่มล้างคิว
+ปุ่มเวลารอแสดงค่าในปุ่มโดยตรง ไม่มี label การตั้งค่าด้านล่าง ปุ่ม **ออก** ปิดห้องทันที
+และพาทุกคนกลับฟอร์มเลขห้อง (Player กลับหน้าเริ่ม)
 
 ข้อมูลทุกห้องอยู่ใน memory ของ server ลบหลังไม่มีอุปกรณ์เชื่อมต่อครบ 60 นาที
 หรือหายเมื่อ restart หน้า Guest/Admin จะแสดงฟอร์มเลขห้องเมื่อห้องหมดอายุ
@@ -295,7 +297,9 @@ Guest แยก **ค้นหาเพลง** และ **คิวเพล�
 Guest และ Admin มีเพลงแนะนำ หมวดเพลง ปุ่มศิลปิน และปุ่มสุ่มเหมือนกัน ใช้โหมดที่เลือกด้วย ทุกโหมดเพิ่มเข้าคิวของห้องเดียวกันและเล่นบน Player ของห้องนั้น
 `/api/search` และ `/api/browse` รองรับ `mode=songs` (ค่าเริ่มต้น) หรือ `mode=karaoke` / `mode=videos`
 
-Guest/Admin สุ่มชื่อเล่นภาษาไทยจาก 100 ชื่อ เก็บไว้ใน browser และแสดง “เพิ่มเพลง โดย {nickname}”
+Guest/Admin สุ่มชื่อเล่นภาษาไทยจาก 100 ชื่อ เก็บไว้ใน browser และแสดง “Music by {nickname}”
+หน้า Guest ไม่มีข้อความ Add a Song และใช้ `/g` เพื่อ redirect ไป `/guest` ได้
+แท็บค้นหา/คิวมีไอคอน ช่องค้นหาใช้ตัวอักษร 16px และข้อความยาวตัดบรรทัดอยู่ในกรอบ
 ชื่อเล่นนี้ส่งเป็นชื่อผู้เพิ่มเพลงโดยไม่ต้องกรอกเอง ผลค้นหาและเพลงแนะนำแสดงครั้งละ 5 เพลง
 กด **เพลงเพิ่มเติม** เพื่อแสดงเพิ่มอีกไม่เกิน 5 เพลง คิวเพลงยังแสดงครบ
 ค้นหาเพลงต่างประเทศได้ตามปกติ ชาร์ตประเทศเลือกจาก YouTube ตาม `DEFAULT_REGION`
@@ -304,7 +308,7 @@ UI ใช้ภาษาไทยเป็นหลักและอังก�
 ชื่อเพลงและข้อมูลศิลปินจาก YouTube แสดงตามต้นฉบับ
 
 Admin แสดงชื่อเพลง รูป ระยะเวลาและชื่อผู้เพิ่ม รองรับลากจัดลำดับด้วยเมาส์/สัมผัส
-และมีปุ่มเลื่อนขึ้น/ลงสำหรับคีย์บอร์ด **ล้างคิว** ลบเฉพาะเพลงที่รอ
+และมีปุ่มเลื่อนขึ้น/ลงสำหรับคีย์บอร์ด คำสั่ง **ล้างคิว** ลบเฉพาะเพลงที่รอ (ปุ่มซ่อนไว้)
 **เล่นตอนนี้** เปลี่ยนเพลงปัจจุบันเป็นเพลงที่เลือก และเก็บเพลงที่เหลือไว้ตามลำดับเดิม
 รีเฟรชหน้าแล้วรับ snapshot ปัจจุบันจาก server ทันที แต่ restart server จะล้าง queue
 รวมถึงข้อมูลห้องและการตั้งค่าทั้งหมด แต่ละห้องใช้ Player หนึ่งเครื่องเป็นแหล่งเสียง
@@ -365,11 +369,12 @@ refresh/reconnect, สิทธิ์ผู้ใช้/กรณีไม่ต
 4. ลบเพลงหนึ่งรายการ แล้วกดเล่นตอนนี้กับเพลงที่รอ: Player ต้องเปลี่ยนเพลง
 5. กดหยุดชั่วคราว/เล่น/ข้าม และปรับเสียง: ตรวจเสียงกับภาพที่ TV
 6. รีเฟรช Admin: เพลง คิว สถานะ pause และ volume ต้องเหมือนเดิม
-7. ล้างคิว: Guest เห็นคิวว่าง โดยเพลงปัจจุบันยังเล่นต่อ
+7. ตรวจปุ่มประเภทงานบน Player และล้างคิวบน Admin ถูกซ่อน ไม่มีปุ่มตัวกรอง
+   ปุ่มเวลารอแสดงค่าปัจจุบันและเปลี่ยนค่าได้ ตรวจช่องค้นหาบน iPhone และเพลงชื่อยาวไม่ดันปุ่ม + ออกข้างจอ
 8. เปิด Guest/Admin โดยไม่มีห้องต้องเห็นฟอร์มเลขห้อง; WebSocket ไม่มี token ต้องไม่เห็นคิวหรือควบคุมได้
    ผู้ดูแลหลักให้/ถอน Controller ผ่านรายชื่อ ตรวจ redirect และ Controller ให้สิทธิ์คนอื่นไม่ได้
 9. เข้า `/explore` ของห้อง: โหลดชาร์ตประเทศไทยก่อน และยังค้นหาเพลงสากลได้
-   กดออกบน Player ตรวจว่าห้องถูกปิด ทุก Guest/Controller กลับฟอร์มเลขห้อง และ Player กลับฟอร์มสร้าง
+   กดออกบน Player ตรวจว่าห้องถูกปิด ทุก Guest/Controller กลับฟอร์มเลขห้อง และ Player กลับหน้าเริ่ม
 10. ตรวจ Docker ในเครื่องทดสอบ: `docker compose config --quiet` และ
     `docker compose up -d --build` (ต้องมี network `reverseproxy` เดิม)
 11. บน TV Box ตรวจเริ่มเล่นอัตโนมัติ; หาก browser บล็อกเสียง ใช้ปุ่มเล่นเดิม

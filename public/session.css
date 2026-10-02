@@ -10,3 +10,14 @@
 #room-error { color: #ffcca6; overflow-wrap: anywhere; }
 
 body[data-screen="player"][data-room-active="false"] { overflow-y: auto; }
+.session-panel.player-entry { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 0; padding: 24px; max-width: none; border: 0; border-radius: 0; overflow-y: auto; background: linear-gradient(160deg, var(--bg-a), var(--bg-b)); font-family: var(--sans); }
+.start-card { width: 100%; text-align: center; }
+.start-logo { font-size: 5rem; }
+.start-card h1 { font: 700 2.4rem/1.3 var(--serif); color: var(--text-hi); margin: .4rem 0; }
+.start-card p { color: var(--muted); margin-bottom: 1.6rem; }
+.start-card #start-btn { font: 600 1.3rem/1 var(--sans); padding: 1rem 2.6rem; border: 0; border-radius: 999px; background: var(--red); color: var(--red-ink); }
+.start-card #start-btn:hover { background: var(--red-hover, oklch(60% 0.19 28)); }
+.start-card small { display: block; margin-top: 1.4rem; color: var(--faint); }
+.start-card #room-create { display: flex; gap: 10px; width: min(100%, 400px); margin: 16px auto 0; }
+#room-create input { flex: 1; min-width: 0; }
+#room-create button { flex-shrink: 0; display: grid; place-items: center; width: 50px; }

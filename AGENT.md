@@ -33,7 +33,7 @@ There is no frontend bundler or compilation step.
 | `src/state.js` | `JukeboxState`: authoritative queue, current track, history, pause state, volume |
 | `src/youtube.js` | YouTube Music search/country charts, oEmbed checks, watch-page metadata |
 | `src/moderation.js` | Optional event-aware LLM content filter |
-| `public/host.*` | Player at `/`: YouTube IFrame, direct startup, QR visibility and room exit |
+| `public/host.*` | Player at `/`: YouTube IFrame, welcome entry, QR visibility and room exit |
 | `public/guest.*` | Public search, Explore, song requests, queue display at `/guest` and `/explore` |
 | `public/admin.*` | Authorized remote controls and queue editing at `/a`; reuses Guest search/request scripts |
 | `public/i18n.js` | Shared UI dictionary and `t()` interpolation |
@@ -54,6 +54,7 @@ There is no frontend bundler or compilation step.
   work. The request limit is 50 upcoming tracks; history is capped at 100 items.
 - Playback state and volume belong to the server snapshot. Player applies them
   through the IFrame API; Admin remains a controller rather than an audio source.
+  New rooms start at 60% volume, applied before loading the first video.
 - `HOST_PASSWORD` authorizes room creation only. The root page only creates rooms;
   Guest entry uses a room number. Empty password disables creation.
 - Every WebSocket authenticates a room credential before receiving a snapshot.
@@ -83,7 +84,13 @@ There is no frontend bundler or compilation step.
 - Keep user-facing UI Thai through the dictionary; preserve YouTube titles and
   artist names. Icon buttons retain Thai `title`/`aria-label`, keyboard access,
   and touch targets. Reacquire pointer capture after moving a dragged row in the DOM.
-- Player opens after creation without a start overlay. Handle autoplay blocking with
+- Keep the `Music by {nickname}` heading with Thai nicknames, icon search/queue tabs,
+  and 16px search inputs. Wrap long result metadata inside its shrinking flex column.
+  Player event context and Admin clear are hidden; the filter button is removed.
+  Admin cooldown shows its value in the button. `/g` redirects to `/guest` with queries intact.
+- Player entry shows the welcome screen first. Start reveals an unlabeled password
+  field with an accessible name and icon-only next button; successful creation opens
+  Player, and closing the room restores welcome. Handle autoplay blocking with
   the existing play button without skipping tracks. Preserve playback-error handling,
   the watchdog's hidden-tab/buffering exceptions, and reconnect authentication.
 - Keep static-asset revalidation and versioned page asset URLs; open clients and

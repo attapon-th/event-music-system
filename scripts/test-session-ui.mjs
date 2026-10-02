@@ -10,6 +10,7 @@ function page(screen, search, storage, respond) {
     if (!nodes.has(id)) {
       const submit = { disabled: false };
       nodes.set(id, { id, value: "", hidden: false, disabled: false, textContent: "",
+        focus() { this.focused = true; },
         querySelector: () => submit, setAttribute(name, value) { this[name] = value; },
         set innerHTML(html) {
           for (const tag of html.matchAll(/<[^>]+id="([^"]+)"[^>]*>/g)) node(tag[1]).hidden = /\bhidden\b/.test(tag[0]);
@@ -46,16 +47,30 @@ function page(screen, search, storage, respond) {
   return { run: (code) => runInContext(code, context), nodes, requests, timers, sockets, location: context.location, history: context.history };
 }
 const member = { code: "123", sessionId: "room-id", token: "member-token", memberId: "guest-id", role: "guest" };
+let wrongPassword = true;
 const entry = page("player", "", new Map(), (path, body) => {
   assert.equal(path, "/api/sessions");
   assert.equal(body.password, "room-password");
+  if (wrongPassword) return { status: 401, data: { error: "รหัสสร้างไม่ถูกต้อง" } };
   return { data: { ...member, role: "player", token: "player-token" } };
 });
 assert.equal(await entry.run("Room.ready"), false);
 assert.equal(entry.nodes.get("room-join").hidden, true);
+assert.equal(entry.nodes.get("room-create").hidden, true);
+assert.equal(entry.nodes.get("room-welcome").hidden, false);
+assert.equal(entry.nodes.get("start-btn").focused, true);
+entry.nodes.get("start-btn").onclick();
+assert.equal(entry.requests.length, 0, "Start reveals the password field without creating a room");
 assert.equal(entry.nodes.get("room-create").hidden, false);
+assert.equal(entry.nodes.get("create-password").focused, true);
+assert.equal(entry.nodes.get("start-btn").hidden, true);
 entry.run("Room.onJoined = () => { globalThis.opened = true; }");
 entry.nodes.get("create-password").value = "room-password";
+await entry.nodes.get("room-create").onsubmit({ preventDefault() {} });
+assert.equal(entry.nodes.get("room-error").textContent, "รหัสสร้างไม่ถูกต้อง");
+assert.equal(entry.nodes.get("room-create").hidden, false, "wrong passwords keep the entry field available for retry");
+assert.equal(entry.nodes.get("room-content").hidden, true);
+wrongPassword = false;
 await entry.nodes.get("room-create").onsubmit({ preventDefault() {} });
 assert.equal(entry.run("opened"), true, "Creation immediately opens the Player in the same document");
 assert.equal(entry.location.href, undefined, "Creation does not navigate away from its user gesture");
@@ -121,6 +136,8 @@ player.sockets[0].onmessage({ data: JSON.stringify({ type: "sessionEnded", code:
 assert.equal(player.run("ended"), true);
 assert.equal(playerStorage.has(playerKey), false);
 assert.equal(player.nodes.get("room-content").hidden, true);
-assert.equal(player.nodes.get("room-create").hidden, false);
+assert.equal(player.nodes.get("room-create").hidden, true);
+assert.equal(player.nodes.get("start-btn").hidden, false);
+assert.equal(player.nodes.get("start-btn").focused, true);
 assert.equal(player.timers.length, 0);
-console.log("PASS: create-only Player, direct startup, Guest join/claim, /a promotion/revocation redirects, reconnect, room close (DOM simulated).");
+console.log("PASS: Player welcome/password/retry/startup, Guest join/claim, /a promotion/revocation redirects, reconnect, room close (DOM simulated).");

@@ -1,5 +1,5 @@
 // Uses the shared search UI and room-scoped authoritative snapshots.
-let adminState = { nowPlaying: null, queue: [], paused: false, volume: 100 };
+let adminState = { nowPlaying: null, queue: [], paused: false, volume: 60 };
 let adminAuthenticated = false;
 let adminRoom = { participants: [], filterOn: false, moderationMode: "default", cooldownSeconds: 15 };
 let draggingId = null;
@@ -45,9 +45,7 @@ function connectAdmin() {
 function renderAdmin() {
   document.getElementById("admin-title").textContent = t("adminRoomTitle", { code: adminRoom.code || Room.code });
   document.title = document.getElementById("admin-title").textContent;
-  const label = !adminRoom.filterOn ? t("Off") : adminRoom.moderationMode === "strict" ? t("Strict") : t("On");
-  document.getElementById("admin-settings").textContent = t("adminSettings", { filter: label, seconds: adminRoom.cooldownSeconds });
-  document.getElementById("admin-filter").setAttribute("aria-pressed", String(adminRoom.filterOn));
+  document.getElementById("admin-cooldown-label").textContent = t("cooldown", { seconds: adminRoom.cooldownSeconds });
   renderParticipants();
   adminControls.forEach((el) => { el.disabled = !adminAuthenticated; });
   document.getElementById("admin-play").disabled = !adminAuthenticated || !adminState.paused;
@@ -175,10 +173,6 @@ function renderParticipants() {
     list.append(row);
   }
 }
-document.getElementById("admin-filter").onclick = () => {
-  const strict = adminRoom.filterOn && adminRoom.moderationMode === "strict";
-  adminSend({ type: "setFilter", on: !strict, mode: adminRoom.filterOn && !strict ? "strict" : "default" });
-};
 document.getElementById("admin-cooldown").onclick = () => {
   const steps = [0, 5, 10, 15, 30, 60];
   adminSend({ type: "setCooldown", seconds: steps[(steps.indexOf(adminRoom.cooldownSeconds) + 1) % steps.length] });

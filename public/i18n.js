@@ -1,6 +1,7 @@
 // Shared UI dictionary. Add another locale here when needed.
 const UI_MESSAGES = { th: {
   "creationPassword": "รหัสสร้าง",
+  "next": "ต่อไป",
   "hideQR": "ซ่อน QR",
   "showQR": "แสดง QR",
   "exit": "ออก",
@@ -13,7 +14,6 @@ const UI_MESSAGES = { th: {
   "participantOffline": "ออฟไลน์",
   "adminRoomTitle": "ผู้ดูแลเพลง · ห้อง {code}",
   "tapToPlay": "กดเล่นเพื่ออนุญาตเสียง",
-  "adminSettings": "ตัวกรอง: {filter} · เวลารอ: {seconds} วินาที",
 
   "joinRoom": "เข้าห้องเดิม",
   "roomNumber": "เลขห้อง 3 หลัก",
@@ -26,8 +26,8 @@ const UI_MESSAGES = { th: {
   "roomActionFailed": "ทำรายการไม่สำเร็จ",
   "roomSystem": "ระบบห้องเพลง",
 
-  "Event Music — Now Playing": "ระบบเพลงส่วนกลาง — กำลังเล่น",
-  "Event Music System": "ระบบเพลงส่วนกลาง",
+  "Event Music — Now Playing": "คิวเพลิน — กำลังเล่น",
+  "Event Music System": "คิวเพลิน",
   "Click to start the jukebox.": "กดเพื่อเริ่มเล่นเพลง",
   "▶  Start": "▶ เริ่มเล่น",
   "Make sure this window's audio goes to the venue's AV system.": "ตรวจสอบว่าเสียงจากเครื่องนี้เชื่อมต่อกับลำโพงแล้ว",
@@ -53,10 +53,10 @@ const UI_MESSAGES = { th: {
   "QR code": "คิวอาร์โค้ด",
   "queue": "คิวเพลง",
   "Up Next": "Up Next",
-  "Add a Song — Event Music": "เพิ่มเพลง — ระบบเพลงส่วนกลาง",
+  "Add a Song — Event Music": "เพิ่มเพลง — คิวเพลิน",
   "Request a song": "เพิ่มเพลง",
   "Add a Song": "Add a Song",
-  "addSongBy": "เพิ่มเพลง โดย {nickname}",
+  "addSongBy": "Music by {nickname}",
   "Search songs or artists…": "ค้นหาเพลงหรือศิลปิน…",
   "Search": "ค้นหาเพลง",
   "searchMode": "โหมดค้นหา",
@@ -132,7 +132,7 @@ const UI_MESSAGES = { th: {
   "position": "เพิ่มแล้ว · ลำดับที่ {position}",
   "wait": "กรุณารอ {seconds} วินาที",
   "filter": "ตัวกรอง: {label}",
-  "cooldown": "เวลารอ: {seconds}",
+  "cooldown": "เวลารอ: {seconds} วินาที",
   "requester": "เพิ่มโดย: {name}"
 } };
 const UI_LANGUAGE = "th";
