@@ -1,0 +1,45 @@
+import assert from "node:assert/strict";
+import { Sessions, SESSION_TTL_MS } from "../src/sessions.js";
+
+let time = 0;
+const events = [];
+const sessions = new Sessions({ cooldownSeconds: 15 }, {
+  now: () => time, pickCode: () => 999, log: (line) => events.push(JSON.parse(line)),
+});
+const a = sessions.create();
+const b = sessions.create();
+assert.equal(a.code, "999");
+assert.equal(b.code, "100", "collisions wrap around without an endless random loop");
+const member = sessions.issue(a, "admin");
+const client = {};
+sessions.attach(client, member);
+time = SESSION_TTL_MS * 2;
+sessions.prune();
+assert.equal(sessions.get(a.code), a, "connected clients keep rooms alive");
+assert.equal(sessions.get(b.code), null, "unvisited rooms expire");
+sessions.detach(client);
+assert.equal(a.idleSince, time);
+time += SESSION_TTL_MS - 1;
+assert.equal(sessions.authenticate(member.token), member);
+sessions.attach(client, member);
+time += SESSION_TTL_MS;
+assert.equal(sessions.get(a.code), a, "returning clients cancel the idle timer");
+sessions.detach(client);
+sessions.detach(client);
+time += SESSION_TTL_MS;
+assert.equal(sessions.authenticate(member.token), null, "deleted room invalidates every credential");
+assert.equal(sessions.tokens.size, 0);
+const replacement = sessions.create();
+assert.equal(replacement.code, a.code);
+assert.notEqual(replacement.id, a.id);
+assert.equal(sessions.get(a.code, a.id), null, "old QR cannot enter a reused number");
+assert.deepEqual(events.map(event => event.event), ["created", "created", "deleted", "deleted", "created"]);
+assert.ok(events.every(event => Object.keys(event).sort().join() === "at,event,room,sessionId"));
+for (let i = 1; i < 900; i++) sessions.create();
+assert.equal(sessions.rooms.size, 900);
+assert.equal(new Set(sessions.rooms.keys()).size, 900);
+assert.equal(sessions.create(), null, "full server declines creation");
+time += SESSION_TTL_MS;
+assert.ok(sessions.create(), "expired rooms free capacity");
+assert.equal(sessions.rooms.size, 1);
+console.log("PASS: session expiry, reconnect, collision/reuse, 900-room limit, token cleanup, lifecycle-only logs.");

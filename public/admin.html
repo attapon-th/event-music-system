@@ -9,29 +9,34 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/guest.css" />
   <link rel="stylesheet" href="/admin.css" />
+  <link rel="stylesheet" href="/session.css" />
 </head>
 <body data-admin="true">
+  <div id="room-content" hidden>
   <header>
-    <h1 data-i18n="admin">ผู้ดูแลเพลง</h1>
-    <nav><a href="/" data-i18n="playerLink">เปิด Player</a> · <a href="/guest" data-i18n="guestLink">เปิดหน้าผู้ฟัง</a></nav>
+    <h1 id="admin-title" data-i18n="admin">ผู้ดูแลเพลง</h1>
     <p id="connection" role="status"></p>
   </header>
 
   <div id="now-playing" class="now-playing hidden"></div>
 
   <section class="admin-controls" aria-label="ควบคุมเพลง">
-    <button id="admin-play" data-i18n="play" disabled></button>
-    <button id="admin-pause" data-i18n="pause" disabled></button>
-    <button id="admin-skip" data-i18n="skip" disabled></button>
-    <label><span data-i18n="volume"></span> <output id="admin-volume-value">100%</output>
+    <button id="admin-play" type="button" data-i18n-title="play" data-i18n-aria-label="play" disabled><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg></button>
+    <button id="admin-pause" type="button" data-i18n-title="pause" data-i18n-aria-label="pause" disabled><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg></button>
+    <button id="admin-skip" type="button" data-i18n-title="skip" data-i18n-aria-label="skip" disabled><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 12 7-12 7Z"/><path d="M19 5v14"/></svg></button>
+    <label><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 9v6h4l5 4V5L7 9Z"/><path d="M16 8a6 6 0 0 1 0 8"/></svg> <output id="admin-volume-value">100%</output>
       <input id="admin-volume" type="range" min="0" max="100" value="100" aria-label="ระดับเสียง" data-i18n-aria-label="volume" disabled />
     </label>
-    <button id="admin-clear" data-i18n="clear" disabled></button>
+    <button id="admin-clear" type="button" data-i18n-title="clear" data-i18n-aria-label="clear" disabled><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg></button>
+    <button id="admin-filter" type="button" data-i18n-title="Content filter" data-i18n-aria-label="Content filter" disabled><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7Z"/><path d="m8 12 3 3 5-6"/></svg></button>
+    <button id="admin-cooldown" type="button" data-i18n-title="Request cooldown" data-i18n-aria-label="Request cooldown" disabled><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
   </section>
+  <p id="admin-settings" role="status"></p>
   <p id="admin-feedback" role="status" aria-live="polite"></p>
   <div class="page-tabs" role="tablist" aria-label="ค้นหาและคิวเพลง">
     <button id="search-tab" type="button" role="tab" aria-selected="true" aria-controls="search-panel" data-i18n="Search"></button>
     <button id="queue-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-panel" tabindex="-1" data-i18n="queue"></button>
+    <button id="participants-tab" type="button" role="tab" aria-selected="false" aria-controls="participants-panel" tabindex="-1" data-i18n="participants"></button>
   </div>
 
   <section id="search-panel" role="tabpanel" aria-labelledby="search-tab">
@@ -77,10 +82,17 @@
     <ul id="queue"></ul>
   </section>
 
+  <section id="participants-panel" role="tabpanel" aria-labelledby="participants-tab" hidden>
+    <h2 data-i18n="participants">ผู้เข้าร่วม</h2>
+    <ul id="participants-list"></ul>
+  </section>
+
   <!-- Toast stack for request feedback (one card per in-flight request) -->
   <div id="toasts" class="toasts"></div>
 
+  </div>
   <script src="/i18n.js"></script>
+  <script src="/session.js"></script>
   <script src="/guest.js"></script>
   <script src="/admin.js"></script>
 </body>

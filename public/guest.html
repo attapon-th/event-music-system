@@ -8,12 +8,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/guest.css" />
+  <link rel="stylesheet" href="/session.css" />
 </head>
-<body>
+<body data-screen="guest">
+  <div id="room-content" hidden>
   <header>
     <h1 id="request-title">เพิ่มเพลง</h1>
     <div class="h-sub" data-i18n="Add a Song">Add a Song</div>
-    <nav><a href="/admin" data-i18n="adminLink">เปิดหน้าผู้ดูแลเพลง</a></nav>
+    <button id="claim-admin" type="button" class="more" hidden data-i18n="claimAdmin">รับสิทธิ์ Admin</button>
+    <p id="claim-error" role="status" aria-live="polite" hidden></p>
   </header>
 
   <div id="now-playing" class="now-playing hidden"></div>
@@ -67,7 +70,9 @@
   <!-- Toast stack for request feedback (one card per in-flight request) -->
   <div id="toasts" class="toasts"></div>
 
+  </div>
   <script src="/i18n.js"></script>
+  <script src="/session.js"></script>
   <script src="/guest.js"></script>
 </body>
 </html>

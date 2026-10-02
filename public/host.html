@@ -8,20 +8,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/host.css" />
+  <link rel="stylesheet" href="/session.css" />
 </head>
-<body>
-  <!-- One click here unlocks browser autoplay so audio reaches the AV system. -->
-  <div id="start-overlay">
-    <div class="start-card">
-      <div class="start-logo">🎶</div>
-      <h1 data-i18n="Event Music System">ระบบเพลงส่วนกลาง</h1>
-      <p data-i18n="Click to start the jukebox.">กดเพื่อเริ่มเล่นเพลง</p>
-      <button id="start-btn" data-i18n="▶  Start">▶ เริ่มเล่น</button>
-      <small data-i18n="Make sure this window's audio goes to the venue's AV system.">ตรวจสอบว่าเสียงจากเครื่องนี้เชื่อมต่อกับลำโพงแล้ว</small>
-    </div>
-  </div>
-
-  <main id="stage" class="hidden">
+<body data-screen="player">
+  <div id="room-content" hidden>
+  <main id="stage">
     <section class="player-pane">
       <div id="player-wrap">
         <div id="player"></div>
@@ -50,13 +41,12 @@
         <button id="skip" title="ข้ามเพลง (N)" data-i18n-title="Skip (n)">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5v14l10-7z"></path><rect x="17" y="5" width="2.6" height="14" rx="1"></rect></svg>
         </button>
-        <button id="filter-toggle" class="pill" title="ตัวกรอง: ปิด → เปิด → เข้มงวด" data-i18n-title="Content filter — off → on → strict (family-friendly)" data-i18n="Content filter">ตัวกรอง</button>
-        <span id="filter-hint" class="filter-hint hidden" data-i18n="no LLM key — accepts all">ไม่ได้ตั้งค่า LLM — รับทุกเพลง</span>
-        <button id="cooldown-toggle" class="pill" title="เวลารอเพิ่มเพลงต่อคน — กดเพื่อเปลี่ยน" data-i18n-title="Per-guest request cooldown — click to change" data-i18n="Request cooldown">เวลารอ</button>
+        <button id="qr-toggle" class="pill" type="button" aria-pressed="false" data-i18n="hideQR">ซ่อน QR</button>
         <button id="context-toggle" class="pill" title="ระบุประเภทงานสำหรับตัวกรอง AI" data-i18n-title="Event context — tell the AI filter what kind of event this is">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6.5-4.3-6.5-10a6.5 6.5 0 0113 0c0 5.7-6.5 10-6.5 10z"></path><circle cx="12" cy="10.5" r="2.4"></circle></svg>
           <span data-i18n="Event context">ประเภทงาน</span>
         </button>
+        <button id="exit-room" class="pill" type="button" data-i18n="exit">ออก</button>
         <div class="vol">
           <svg width="18" height="18" viewBox="0 0 24 24"><path d="M4 9.5v5h3.6l4.9 4V5.5l-4.9 4H4z" fill="currentColor"></path><path d="M16.2 9.3a4.3 4.3 0 010 5.9" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"></path><path d="M18.6 6.8a8 8 0 010 10.9" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"></path></svg>
           <input id="volume" aria-label="ระดับเสียง" data-i18n-aria-label="volume" type="range" min="0" max="100" value="100" />
@@ -70,7 +60,7 @@
     </section>
 
     <aside class="sidebar">
-      <div class="qr-card">
+      <div id="qr-card" class="qr-card">
         <div class="qr-title" data-i18n="Scan to request a song">สแกนเพื่อเพิ่มเพลง</div>
         <div class="qr-sub" data-i18n="Scan to add a song">Scan to add a song</div>
         <div class="qr-frame"><img id="qr" alt="คิวอาร์โค้ด" data-i18n-alt="QR code" /></div>
@@ -85,7 +75,9 @@
     </aside>
   </main>
 
+  </div>
   <script src="/i18n.js"></script>
+  <script src="/session.js"></script>
   <script src="/host.js"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
 </body>

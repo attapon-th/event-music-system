@@ -1,7 +1,7 @@
-// Uses the same request/search UI, host token, and authoritative WS snapshots.
-let adminSocket;
+// Uses the shared search UI and room-scoped authoritative snapshots.
 let adminState = { nowPlaying: null, queue: [], paused: false, volume: 100 };
 let adminAuthenticated = false;
+let adminRoom = { participants: [], filterOn: false, moderationMode: "default", cooldownSeconds: 15 };
 let draggingId = null;
 const adminFeedback = document.getElementById("admin-feedback");
 const adminControls = document.querySelectorAll(".admin-controls button, .admin-controls input");
@@ -13,50 +13,42 @@ const queueIcons = {
 };
 
 function adminSend(message) {
-  if (adminAuthenticated && adminSocket?.readyState === WebSocket.OPEN) {
-    adminSocket.send(JSON.stringify(message));
+  if (adminAuthenticated) {
+    Room.send(message);
   } else adminFeedback.textContent = t("offline");
 }
 
-async function connectAdmin() {
-  adminAuthenticated = false;
-  adminControls.forEach((el) => { el.disabled = true; });
-  document.getElementById("connection").textContent = t("connecting");
-  try {
-    const response = await fetch("/api/host-token", { cache: "no-store" });
-    if (!response.ok) throw new Error(t("authFailed"));
-    const { token } = await response.json();
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    adminSocket = new WebSocket(`${proto}://${location.host}`);
-    adminSocket.onopen = () => adminSocket.send(JSON.stringify({ type: "auth", token }));
-    adminSocket.onmessage = ({ data }) => {
-      const msg = JSON.parse(data);
-      if (msg.type === "auth") {
-        adminAuthenticated = msg.ok;
-        document.getElementById("connection").textContent = t(msg.ok ? "connected" : "authFailed");
-        renderAdmin();
-      }
-      if (msg.type === "state") {
-        adminState = msg.state;
-        lastQueueState = msg.state;
-        renderAdmin();
-      }
-      if (msg.type === "error") adminFeedback.textContent = msg.error;
-    };
-    adminSocket.onclose = () => {
+function connectAdmin() {
+  Room.connect({
+    onAuth(msg) {
+      adminAuthenticated = ["admin", "controller"].includes(msg.role);
+      document.getElementById("connection").textContent = t(adminAuthenticated ? "connected" : "authFailed");
+      renderAdmin();
+    },
+    onState(msg) {
+      adminRoom = msg;
+      adminAuthenticated = ["admin", "controller"].includes(msg.role);
+      adminState = msg.state;
+      lastQueueState = msg.state;
+      renderAdmin();
+    },
+    onError(msg) { adminFeedback.textContent = msg.error; },
+    onOffline() {
       adminAuthenticated = false;
       draggingId = null;
       renderAdmin();
       document.getElementById("connection").textContent = t("offline");
-      setTimeout(connectAdmin, 1500);
-    };
-  } catch (err) {
-    document.getElementById("connection").textContent = err.message;
-    setTimeout(connectAdmin, 3000);
-  }
+    },
+  });
 }
 
 function renderAdmin() {
+  document.getElementById("admin-title").textContent = t("adminRoomTitle", { code: adminRoom.code || Room.code });
+  document.title = document.getElementById("admin-title").textContent;
+  const label = !adminRoom.filterOn ? t("Off") : adminRoom.moderationMode === "strict" ? t("Strict") : t("On");
+  document.getElementById("admin-settings").textContent = t("adminSettings", { filter: label, seconds: adminRoom.cooldownSeconds });
+  document.getElementById("admin-filter").setAttribute("aria-pressed", String(adminRoom.filterOn));
+  renderParticipants();
   adminControls.forEach((el) => { el.disabled = !adminAuthenticated; });
   document.getElementById("admin-play").disabled = !adminAuthenticated || !adminState.paused;
   document.getElementById("admin-pause").disabled = !adminAuthenticated || adminState.paused;
@@ -160,4 +152,35 @@ document.getElementById("admin-volume").oninput = (event) => {
   document.getElementById("admin-volume-value").textContent = `${event.target.value}%`;
   adminSend({ type: "setVolume", volume: Number(event.target.value) });
 };
-connectAdmin();
+function renderParticipants() {
+  const list = document.getElementById("participants-list");
+  list.replaceChildren();
+  for (const person of adminRoom.participants || []) {
+    const row = document.createElement("li");
+    const label = document.createElement("span");
+    const role = person.role === "admin" ? t("primaryAdmin") : person.role === "controller" ? t("controller")
+      : person.role === "player" ? "Player" : "Guest";
+    label.textContent = `${person.name} · ${role} · ${t(person.online ? "online" : "participantOffline")}`;
+    row.append(label);
+    if (adminAuthenticated && adminRoom.memberId === adminRoom.primaryAdminId && !["admin", "player"].includes(person.role)) {
+      const button = document.createElement("button");
+      const enabled = person.role !== "controller";
+      button.type = "button";
+      button.title = t(enabled ? "grantControl" : "revokeControl");
+      button.setAttribute("aria-label", button.title);
+      button.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 10h6${enabled ? 'M19 7v6' : ''}"/></svg>`;
+      button.onclick = () => adminSend({ type: "setParticipantRole", id: person.id, enabled });
+      row.append(button);
+    }
+    list.append(row);
+  }
+}
+document.getElementById("admin-filter").onclick = () => {
+  const strict = adminRoom.filterOn && adminRoom.moderationMode === "strict";
+  adminSend({ type: "setFilter", on: !strict, mode: adminRoom.filterOn && !strict ? "strict" : "default" });
+};
+document.getElementById("admin-cooldown").onclick = () => {
+  const steps = [0, 5, 10, 15, 30, 60];
+  adminSend({ type: "setCooldown", seconds: steps[(steps.indexOf(adminRoom.cooldownSeconds) + 1) % steps.length] });
+};
+Room.ready.then((joined) => { if (joined) connectAdmin(); });

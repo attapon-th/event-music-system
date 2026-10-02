@@ -1,6 +1,6 @@
 // Load test: simulates N phone guests against a running deployment.
 //
-//   bun scripts/loadtest.mjs --url https://your-public-url --guests 140
+//   bun scripts/loadtest.mjs --url https://your-public-url --room 123 --guests 140
 //
 // Each virtual guest behaves like a real one: loads /guest, holds a WebSocket
 // open (reconnecting if dropped, like guest.js does), taps browse tabs,
@@ -9,6 +9,7 @@
 //
 // Knobs (defaults are event-realistic for ~140 people):
 //   --url URL             target (default http://localhost:45416)
+//   --room CODE            existing 3-digit room to test (required)
 //   --guests N            concurrent guests (default 140)
 //   --duration SECS       hold time after ramp-up (default 120)
 //   --ramp SECS           connect stagger window (default 20)
@@ -17,8 +18,7 @@
 //   --request-per-min N   total song requests/min (default 20 — hits YouTube oEmbed + LLM if filter is ON)
 //
 // Before running against production: turn the filter OFF from the host page
-// (or accept ~request-per-min LLM calls), and restart the container afterwards
-// to clear the junk queue.
+// (or accept ~request-per-min LLM calls). Clear the test room queue afterwards.
 
 const args = {};
 for (let i = 2; i < process.argv.length; i++) {
@@ -28,6 +28,8 @@ for (let i = 2; i < process.argv.length; i++) {
 
 const BASE = (args.url || "http://localhost:45416").replace(/\/+$/, "");
 const WS_BASE = BASE.replace(/^http/, "ws");
+const ROOM_CODE = args.room;
+if (!/^[1-9][0-9]{2}$/.test(ROOM_CODE || "")) throw new Error("Use --room CODE for an existing 3-digit room");
 const GUESTS = parseInt(args.guests || "140", 10);
 const DURATION_MS = parseInt(args.duration || "120", 10) * 1000;
 const RAMP_MS = parseInt(args.ramp || "20", 10) * 1000;
@@ -119,6 +121,7 @@ function connectWs(guest) {
     sockets.add(ws);
     ws.onopen = () => {
       counts.wsConnected++;
+      ws.send(JSON.stringify({ type: "auth", token: guest.token, sessionId: guest.sessionId }));
     };
     ws.onmessage = (ev) => {
       try {
@@ -166,8 +169,14 @@ async function runGuest(i, videoPool) {
     noteErr(`page: ${err.message}`);
   }
 
+  const joined = await fetch(`${BASE}/api/sessions/join`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: ROOM_CODE }),
+  });
+  if (!joined.ok) { noteErr(`join: ${joined.status}`); return; }
+  const member = await joined.json();
+
   // 2. persistent WebSocket
-  connectWs(i);
+  connectWs(member);
 
   // 3. behavior loops — per-guest rates so totals hit the configured target
   const loops = [
@@ -184,7 +193,7 @@ async function runGuest(i, videoPool) {
       const v = videoPool[Math.floor(Math.random() * videoPool.length)];
       const j = await timedFetch("request", "requestAccepted", "requestErr", `${BASE}/api/request`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${member.token}`, "X-Session-Id": member.sessionId },
         body: JSON.stringify({ ...v, name: `LoadTester ${i}`, clientId }),
       });
       // ok:false (cooldown / duplicate / queue full / filter) is expected traffic,

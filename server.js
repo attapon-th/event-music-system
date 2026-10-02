@@ -9,8 +9,8 @@
 //   3. moderate()       — optional LLM verdict for this event (fail-open)
 //   4. state.add()      — enqueue; broadcast to all clients over WebSocket
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { readFileSync, existsSync } from "node:fs";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import http from "node:http";
@@ -20,7 +20,7 @@ import QRCode from "qrcode";
 
 import { searchYouTube, fetchChartHits, checkPlayable, fetchVideoDetails } from "./src/youtube.js";
 import { moderate, moderationConfigured } from "./src/moderation.js";
-import { JukeboxState } from "./src/state.js";
+import { Sessions } from "./src/sessions.js";
 import { detectLanIp } from "./src/net.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -46,83 +46,107 @@ const LAN_IP = detectLanIp(process.env.HOST_IP);
 // app runs behind a reverse proxy. Otherwise fall back to LAN IP + port.
 const PUBLIC_BASE = (process.env.PUBLIC_URL || "").replace(/\/+$/, "");
 const GUEST_URL = PUBLIC_BASE ? `${PUBLIC_BASE}/guest` : `http://${LAN_IP}:${PORT}/guest`;
-// --- Persistent host settings ---------------------------------------------
-// Filter on/off, moderation mode, cooldown, and event context are all editable
-// live from the host page and survive restarts in data/settings.json (docker-
-// compose mounts ./data as a volume). The .env values only seed the first boot.
-const DATA_DIR = path.join(__dirname, "data");
-const SETTINGS_PATH = path.join(DATA_DIR, "settings.json");
-let savedSettings = {};
-try {
-  savedSettings = JSON.parse(readFileSync(SETTINGS_PATH, "utf8"));
-} catch {
-  /* first boot — fall back to .env below */
-}
-
-// Filter (LLM moderation): when ON but no API key is configured, moderation
-// fails open (accepts everything) — harmless.
-let filterOn =
-  savedSettings.filterOn ?? String(process.env.ENABLE_MODERATION || "").toLowerCase() === "true";
-// "strict" = family-friendly only; "default" = block non-music/explicit/unfit.
-let moderationMode =
-  savedSettings.moderationMode ??
-  ((process.env.MODERATION_MODE || "").toLowerCase() === "strict" ? "strict" : "default");
-// Event context for the moderation LLM ("what kind of event is this?") — one
-// deployment serves different venues. Empty = moderation.js's built-in default.
-let eventContext = savedSettings.eventContext ?? (process.env.EVENT_CONTEXT || "");
-// Per-guest request cooldown (seconds, 0 = off).
-let cooldownSeconds = savedSettings.cooldownSeconds ?? 15;
-
-function saveSettings() {
-  try {
-    mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(
-      SETTINGS_PATH,
-      JSON.stringify({ filterOn, moderationMode, eventContext, cooldownSeconds }, null, 2)
-    );
-  } catch (err) {
-    console.warn(`[settings] could not save: ${err.message}`);
-  }
-}
+const sessions = new Sessions({
+  filterOn: String(process.env.ENABLE_MODERATION || "").toLowerCase() === "true",
+  moderationMode: (process.env.MODERATION_MODE || "").toLowerCase() === "strict" ? "strict" : "default",
+  eventContext: process.env.EVENT_CONTEXT || "",
+  cooldownSeconds: 15,
+});
 
 const app = express();
 app.set("trust proxy", true); // behind a reverse proxy — req.ip should read X-Forwarded-For
 app.use(express.json());
 
-// --- Host/Admin authentication ---------------------------------------
-// HOST_PASSWORD in .env gates the projector page (Basic Auth) and its controls
-// (a per-boot token the host page carries onto its WebSocket). Guests never
-// need it. Unset disables privileged pages and controls.
+// The creation password authorizes new rooms only.
 const HOST_PASSWORD = process.env.HOST_PASSWORD || "";
-const hostToken = randomUUID();
-function requireHostAuth(req, res, next) {
-  if (!HOST_PASSWORD) return res.status(503).send("กรุณาตั้งค่า HOST_PASSWORD เพื่อใช้งาน Player และ Admin");
-  const b64 = (req.headers.authorization || "").match(/^Basic ([A-Za-z0-9+/=]+)$/i)?.[1] || "";
-  const pass = Buffer.from(b64, "base64").toString().split(":").slice(1).join(":");
-  if (pass === HOST_PASSWORD) return next();
-  res.set("WWW-Authenticate", 'Basic realm="Event Music Host"').status(401).send("กรุณาเข้าสู่ระบบด้วยรหัสผ่านผู้ดูแล");
+const failedAttempts = new Map();
+const hash = (value) => createHash("sha256").update(value).digest();
+function tokenFrom(req) {
+  return (req.headers.authorization || "").match(/^Bearer ([A-Za-z0-9-]+)$/)?.[1];
 }
-app.use(["/host.html", "/admin.html"], requireHostAuth); // the static copy must not bypass "/"
-
-app.use(
-  express.static(path.join(__dirname, "public"), {
-    // Force revalidation on every load (cheap 304s via ETag). Without this,
-    // iOS Safari holds onto stale JS/CSS across deploys.
-    setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
-  })
-);
-
-const state = new JukeboxState();
+function fail(req, res, status, error) {
+  const now = Date.now();
+  let entry = failedAttempts.get(req.ip);
+  if (!entry || now - entry.at >= 60000) entry = { at: now, count: 0 };
+  entry.count++;
+  failedAttempts.set(req.ip, entry);
+  return res.status(status).json({ error });
+}
+function checkAttempts(req, res, next) {
+  const entry = failedAttempts.get(req.ip);
+  if (entry && Date.now() - entry.at < 60000 && entry.count >= 10) {
+    return res.status(429).json({ error: "ลองไม่สำเร็จหลายครั้ง กรุณารอหนึ่งนาที" });
+  }
+  next();
+}
+function requirePassword(req, res, next) {
+  if (!HOST_PASSWORD) return res.status(503).json({ error: "กรุณาตั้งรหัสสร้างก่อนใช้งาน" });
+  const password = req.body?.password;
+  if (typeof password !== "string" || !timingSafeEqual(hash(password), hash(HOST_PASSWORD))) {
+    return fail(req, res, 401, "รหัสสร้างไม่ถูกต้อง");
+  }
+  next();
+}
+function findRoom(req, res, next) {
+  const { code, sessionId } = req.body || {};
+  if (typeof code !== "string" || !/^[1-9][0-9]{2}$/.test(code) ||
+      (sessionId !== undefined && typeof sessionId !== "string")) {
+    return fail(req, res, 400, "กรุณากรอกเลขห้อง 3 หลัก");
+  }
+  req.room = sessions.get(code, sessionId);
+  if (!req.room) return fail(req, res, 410, "ห้องหมดอายุหรือไม่พบห้อง");
+  next();
+}
+function requireMember(req, res, next) {
+  req.member = sessions.authenticate(tokenFrom(req), req.headers["x-session-id"]);
+  if (!req.member) return res.status(401).json({ code: "SESSION_INVALID", error: "ห้องหมดอายุหรือไม่มีสิทธิ์เข้าห้อง" });
+  next();
+}
+function memberInfo(member) {
+  return { code: member.room.code, sessionId: member.room.id, token: member.token, role: member.role, memberId: member.id };
+}
+app.post("/api/sessions", checkAttempts, requirePassword, (_req, res) => {
+  const room = sessions.create();
+  if (!room) return res.status(409).json({ error: "ห้องเต็ม กรุณาลองใหม่ภายหลัง" });
+  room.state.onChange = room.onMembersChange = () => broadcastState(room);
+  res.set("Cache-Control", "no-store").json(memberInfo(sessions.issue(room, "player")));
+});
+app.post("/api/sessions/join", checkAttempts, findRoom, (req, res) => {
+  const saved = sessions.authenticate(tokenFrom(req), req.room.id);
+  const member = saved?.room === req.room && saved.role !== "player" ? saved : sessions.issue(req.room, "guest");
+  if (typeof req.body.name === "string" && req.body.name.trim()) member.name = req.body.name.trim().slice(0, 40);
+  res.set("Cache-Control", "no-store").json(memberInfo(member));
+});
+app.post("/api/sessions/admin/claim", requireMember, (req, res) => {
+  const { member } = req;
+  if (member.role === "player") return res.status(403).json({ error: "กรุณาเข้าผ่านหน้า Guest เพื่อรับสิทธิ์ผู้ดูแล" });
+  if (member.role !== "admin") {
+    if (member.room.primaryAdminId) return res.status(403).json({ error: "ห้องนี้มีผู้ดูแลหลักแล้ว" });
+    member.role = "admin";
+    member.room.primaryAdminId = member.id;
+    broadcastState(member.room);
+  }
+  res.json(memberInfo(member));
+});
+app.post("/api/sessions/close", requireMember, (req, res) => {
+  if (req.member.role !== "player") return res.status(403).json({ error: "เฉพาะ Player เท่านั้นที่ปิดห้องได้" });
+  sessions.delete(req.member.room);
+  res.json({ ok: true });
+});
 
 // --- HTTP API ------------------------------------------------------------
 
 // Host page bootstrap: guest URL + a QR code pointing at it.
-app.get("/api/info", async (_req, res) => {
+app.get("/api/info", requireMember, async (req, res) => {
   try {
-    const qr = await QRCode.toDataURL(GUEST_URL, { width: 480, margin: 1 });
-    res.json({ guestUrl: GUEST_URL, qr, filterOn, moderationMode, moderationConfigured: moderationConfigured(), defaultRegion: DEFAULT_REGION, defaultLocale: DEFAULT_LOCALE });
-  } catch (err) {
-    res.status(500).json({ error: String(err?.message || err) });
+    const room = req.member.room;
+    const guestUrl = `${GUEST_URL}?room=${room.code}&session=${room.id}`;
+    const qr = await QRCode.toDataURL(guestUrl, { width: 480, margin: 1 });
+    res.set("Cache-Control", "no-store").json({ ...memberInfo(req.member), guestUrl, qr,
+      filterOn: room.filterOn, moderationMode: room.moderationMode, primaryAdminId: room.primaryAdminId,
+      moderationConfigured: moderationConfigured(), defaultRegion: DEFAULT_REGION, defaultLocale: DEFAULT_LOCALE });
+  } catch {
+    res.status(500).json({ error: "สร้าง QR ไม่สำเร็จ กรุณาลองใหม่" });
   }
 });
 
@@ -161,22 +185,16 @@ app.get("/api/browse", async (req, res) => {
     if (browseCache.size > 200) browseCache.delete(browseCache.keys().next().value);
     res.json({ results });
   } catch (err) {
-    console.error("[browse]", err.message);
     res.status(502).json({ error: "โหลดเพลงไม่สำเร็จ กรุณาลองใหม่" });
   }
 });
 
-// Flood control: one request per cooldown window (cooldownSeconds) per guest.
-// Keyed on IP + the guest page's persistent clientId — at an event most guests
-// sit behind the venue Wi-Fi's single NAT'd IP, so IP alone would give the
-// whole party one shared cooldown. (clientId is client-chosen, so a determined
-// prankster can rotate it — the host's remove button is the backstop.)
-const lastRequestAt = new Map(); // "ip|clientId" -> timestamp of last attempt
-function pruneLastRequestAt() {
-  if (lastRequestAt.size <= 500) return;
-  const cutoff = Date.now() - cooldownSeconds * 1000;
-  for (const [key, at] of lastRequestAt) {
-    if (at < cutoff) lastRequestAt.delete(key);
+// Cooldown belongs to each room, including independent requests behind venue NAT.
+function pruneLastRequestAt(room) {
+  if (room.lastRequestAt.size <= 500) return;
+  const cutoff = Date.now() - room.cooldownSeconds * 1000;
+  for (const [key, at] of room.lastRequestAt) {
+    if (at < cutoff) room.lastRequestAt.delete(key);
   }
 }
 
@@ -191,19 +209,14 @@ app.get("/api/search", async (req, res) => {
     const results = await searchYouTube(q, { ...youtubeOptions, mode });
     res.json({ results });
   } catch (err) {
-    console.error("[search]", err.message);
     res.status(502).json({ error: "ค้นหาไม่สำเร็จ กรุณาลองใหม่" });
   }
 });
 
-// Host page bootstrap, part 2: the WS control token (Basic-Auth-gated, so
-// only an authenticated host page can obtain it).
-app.get("/api/host-token", requireHostAuth, (_req, res) => {
-  res.set("Cache-Control", "no-store").json({ token: hostToken });
-});
-
 // Guest requests a song.
-app.post("/api/request", async (req, res) => {
+app.post("/api/request", requireMember, async (req, res) => {
+  const room = req.member.room;
+  const { state, cooldownSeconds, filterOn, moderationMode, eventContext, lastRequestAt } = room;
   const { videoId, title, channel, duration, thumbnail, name, clientId } = req.body || {};
   if (typeof videoId !== "string" || !/^[A-Za-z0-9_-]{11}$/.test(videoId) ||
       typeof title !== "string" || !title.trim() || title.length > 500 ||
@@ -237,7 +250,7 @@ app.post("/api/request", async (req, res) => {
   // a guest out (e.g. after tapping a duplicate), but everything below hits
   // YouTube and possibly the LLM — that's what the cooldown protects.
   lastRequestAt.set(floodKey, Date.now());
-  pruneLastRequestAt();
+  pruneLastRequestAt(room);
 
   // 1. Is the video actually playable?
   const playable = await checkPlayable(videoId);
@@ -258,6 +271,10 @@ app.post("/api/request", async (req, res) => {
     }
   }
 
+  if (sessions.authenticate(req.member.token) !== req.member) {
+    return res.status(401).json({ code: "SESSION_INVALID", error: "ห้องหมดอายุหรือไม่มีสิทธิ์เข้าห้อง" });
+  }
+
   // Recheck after network work: simultaneous requests can otherwise bypass guardrails.
   if (state.has(videoId)) return res.json({ ok: false, reason: "เพลงนี้อยู่ในคิวแล้ว" });
   if (state.queue.length >= MAX_QUEUE_LENGTH) return res.json({ ok: false, reason: "คิวเพลงเต็ม กรุณาลองใหม่ภายหลัง" });
@@ -273,81 +290,91 @@ app.post("/api/request", async (req, res) => {
 const BOOT_ID = Date.now().toString(36);
 function versionedPage(name) {
   return readFileSync(path.join(__dirname, "public", name), "utf8").replace(
-    /(href|src)="\/((?:guest|host|admin|i18n)\.(?:css|js))"/g,
+    /(href|src)="\/((?:guest|host|admin|i18n|session)\.(?:css|js))"/g,
     `$1="/$2?v=${BOOT_ID}"`
   );
 }
 const HOST_PAGE = versionedPage("host.html");
 const GUEST_PAGE = versionedPage("guest.html");
 const ADMIN_PAGE = versionedPage("admin.html");
-app.get("/admin", requireHostAuth, (_req, res) => {
-  res.set("Cache-Control", "no-cache").type("html").send(ADMIN_PAGE);
-});
+app.get("/a", (_req, res) => res.set("Cache-Control", "no-cache").type("html").send(ADMIN_PAGE));
+app.get(["/admin", "/admin.html"], (req, res) => res.redirect(302, req.originalUrl.replace(/^\/admin(?:\.html)?/, "/a")));
+app.get(["/", "/host.html"], (_req, res) => res.set("Cache-Control", "no-cache").type("html").send(HOST_PAGE));
+app.get(["/guest", "/guest.html", "/explore"], (_req, res) => res.set("Cache-Control", "no-cache").type("html").send(GUEST_PAGE));
 
-// Host page lives at "/".
-app.get("/", requireHostAuth, (_req, res) => {
-  res.set("Cache-Control", "no-cache").type("html").send(HOST_PAGE);
-});
-
-// Guest page — the QR code points here (extensionless, so static won't serve it).
-app.get(["/guest", "/explore"], (_req, res) => {
-  res.set("Cache-Control", "no-cache").type("html").send(GUEST_PAGE);
-});
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
+}));
 
 // --- WebSocket: real-time queue sync + host controls ---------------------
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: 16 * 1024 });
 
-function stateMessage() {
+function stateMessage(room, member) {
+  const online = new Set([...room.clients].map(client => client.member?.id));
   return JSON.stringify({
-    type: "state",
-    state: state.snapshot(),
-    filterOn,
-    moderationMode,
-    cooldownSeconds,
-    eventContext,
+    type: "state", state: room.state.snapshot(), sessionId: room.id, code: room.code,
+    filterOn: room.filterOn, moderationMode: room.moderationMode,
+    cooldownSeconds: room.cooldownSeconds, eventContext: room.eventContext,
+    primaryAdminId: room.primaryAdminId, memberId: member.id, role: member.role,
+    ...(["admin", "controller"].includes(member.role) ? { participants: [...room.members.values()].map(person => ({
+      id: person.id, name: person.name, role: person.role, online: online.has(person.id),
+    })) } : {}),
   });
 }
-function broadcastState() {
-  const msg = stateMessage();
-  for (const client of wss.clients) {
-    if (client.readyState === 1) client.send(msg);
+function broadcastState(room) {
+  for (const client of room.clients) {
+    if (client.readyState === 1 && sessions.authenticate(client.member?.token) === client.member) {
+      client.send(stateMessage(room, client.member));
+    }
   }
 }
-state.onChange = broadcastState;
 
 wss.on("connection", (ws) => {
-  // All sockets start read-only; only the protected token grants controls.
-  ws.isHost = false;
-
-  // Send current state immediately on connect.
-  ws.send(stateMessage());
-
+  ws.alive = true;
+  ws.on("pong", () => { ws.alive = true; });
+  ws.on("close", () => sessions.detach(ws));
+  ws.on("error", () => sessions.detach(ws));
   ws.on("message", (raw) => {
     let msg;
-    try {
-      msg = JSON.parse(raw.toString());
-    } catch {
-      return;
-    }
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (!msg || typeof msg !== "object" || Array.isArray(msg)) return;
     if (msg.type === "auth") {
-      ws.isHost = !!HOST_PASSWORD && msg.token === hostToken;
-      ws.send(JSON.stringify({ type: "auth", ok: ws.isHost }));
+      const member = sessions.authenticate(msg.token, msg.sessionId);
+      sessions.detach(ws);
+      if (!member) {
+        ws.send(JSON.stringify({ type: "auth", ok: false, error: "ห้องหมดอายุหรือไม่มีสิทธิ์เข้าห้อง" }));
+        return;
+      }
+      // A second tab on the same Player must not become a second audio source.
+      if (member.role === "player") {
+        for (const other of [...member.room.clients]) {
+          if (other.member?.token === member.token) {
+            other.send(JSON.stringify({ type: "sessionEnded", code: "PLAYER_MOVED", error: "เปิด Player ในหน้าใหม่แล้ว" }));
+            sessions.detach(other);
+            other.close(4001, "Player replaced");
+          }
+        }
+      }
+      if (member.role !== "player" && typeof msg.name === "string" && msg.name.trim()) member.name = msg.name.trim().slice(0, 40);
+      sessions.attach(ws, member);
+      ws.send(JSON.stringify({ type: "auth", ok: true, role: member.role }));
+      broadcastState(member.room);
       return;
     }
-    if (!ws.isHost) {
+    const member = sessions.authenticate(ws.member?.token);
+    if (!member || member !== ws.member || member.role === "guest" ||
+        (["ended", "error"].includes(msg.type) && member.role !== "player") ||
+        (["setParticipantRole", "setFilter", "setCooldown"].includes(msg.type) &&
+          (msg.type === "setParticipantRole" ? member.role !== "admin" : !["admin", "controller"].includes(member.role)))) {
       ws.send(JSON.stringify({ type: "error", error: "ไม่มีสิทธิ์ควบคุมเพลง" }));
       return;
-    } // every other message type is a host control
+    }
+    const room = member.room;
+    const state = room.state;
     switch (msg.type) {
       case "ended": // host player finished a track
       case "error": // host player couldn't play (embed-disabled/region-locked)
-        if (msg.type === "error") {
-          console.warn(`[host] playback error code ${msg.code} on ${msg.videoId} — skipping`);
-        } else {
-          console.log(`[host] ended ${msg.videoId}`);
-        }
         if (typeof msg.videoId === "string") state.advance(msg.videoId);
         break;
       case "skip":
@@ -365,7 +392,7 @@ wss.on("connection", (ws) => {
       case "reorder":
         if (!state.reorder(msg.ids)) {
           ws.send(JSON.stringify({ type: "error", error: "คิวเปลี่ยนแล้ว กรุณาจัดลำดับใหม่" }));
-          ws.send(stateMessage());
+          ws.send(stateMessage(room, member));
         }
         break;
       case "playNow":
@@ -378,49 +405,59 @@ wss.on("connection", (ws) => {
       case "setVolume":
         state.setVolume(msg.volume);
         break;
-      case "setFilter": // host cycled the content filter: off / on / strict
+      case "setParticipantRole": {
+        const target = room.members.get(msg.id);
+        if (typeof msg.enabled !== "boolean" || !target || target.role === "player" || target.id === room.primaryAdminId) {
+          ws.send(JSON.stringify({ type: "error", error: "ไม่สามารถเปลี่ยนสิทธิ์ผู้เข้าร่วมนี้ได้" }));
+          break;
+        }
+        target.role = msg.enabled ? "controller" : "guest";
+        broadcastState(room);
+        break;
+      }
+      case "setFilter":
         if (typeof msg.on !== "boolean") break;
-        filterOn = msg.on;
-        if (msg.mode === "strict" || msg.mode === "default") moderationMode = msg.mode;
-        console.log(`[host] filter ${filterOn ? `ON (${moderationMode})` : "OFF"}`);
-        saveSettings();
-        broadcastState();
+        room.filterOn = msg.on;
+        if (msg.mode === "strict" || msg.mode === "default") room.moderationMode = msg.mode;
+        broadcastState(room);
         break;
       case "setCooldown": {
-        // host adjusted the per-guest request cooldown (0 = off)
         if (typeof msg.seconds !== "number") break;
-        const s = Math.round(msg.seconds);
-        if (Number.isFinite(s) && s >= 0 && s <= 300) {
-          cooldownSeconds = s;
-          console.log(`[host] request cooldown set to ${s ? s + "s" : "OFF"}`);
-          saveSettings();
-          broadcastState();
+        const seconds = Math.round(msg.seconds);
+        if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 300) {
+          room.cooldownSeconds = seconds;
+          broadcastState(room);
         }
         break;
       }
-      case "setEventContext": // host described the venue/occasion for the filter
+      case "setEventContext":
         if (typeof msg.context !== "string") break;
-        eventContext = msg.context.slice(0, 300);
-        console.log(`[host] event context set to: ${eventContext || "(default)"}`);
-        saveSettings();
-        broadcastState();
+        room.eventContext = msg.context.slice(0, 300);
+        broadcastState(room);
         break;
     }
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log("\n  🎶  Event Music System running\n");
-  console.log(`  Projector (host) : http://localhost:${PORT}/`);
-  console.log(`  Guests scan QR   : ${GUEST_URL}`);
-  console.log(
-    `  Filter           : ${filterOn ? `ON (${moderationMode})` : "OFF"} (change from host page) · ` +
-      `LLM ${moderationConfigured() ? "configured" : "NOT configured — filter accepts all"}`
-  );
-  console.log(
-    `  Host password    : ${HOST_PASSWORD ? "SET — host page requires login" : "NOT SET — Player/Admin disabled"}\n`
-  );
-  if (LAN_IP === "127.0.0.1") {
-    console.warn("  ⚠  Could not detect a LAN IP — guests on other devices won't reach you.\n");
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (!ws.alive) {
+      sessions.detach(ws);
+      ws.terminate();
+    } else {
+      ws.alive = false;
+      ws.ping();
+    }
   }
+}, 30000).unref();
+setInterval(() => {
+  sessions.prune();
+  for (const [ip, entry] of failedAttempts) {
+    if (Date.now() - entry.at >= 60000) failedAttempts.delete(ip);
+  }
+}, 60000).unref();
+
+app.use((err, _req, res, _next) => {
+  res.status(err.status || 500).json({ error: "คำขอไม่ถูกต้องหรือระบบขัดข้อง กรุณาลองใหม่" });
 });
+server.listen(PORT, "0.0.0.0");

@@ -1,9 +1,21 @@
 # Event Music System
 
-A shared jukebox for an event or venue: guests choose songs, an admin manages
+Independent jukebox sessions for events or venues: guests choose songs, an admin manages
 the running order, and a designated player supplies music to the venue.
 
 ## Language
+
+### Rooms and admission
+
+**Session**:
+One temporary music room with its own running order, settings, guests, admins,
+and designated Player. It ends after everyone has left for an hour.
+_Avoid_: Login session, permanent venue.
+
+**Room number**:
+The three-digit number used to find and join a live Session. A later Session
+may have the same number without inheriting its people or music.
+_Avoid_: Password, permanent identity.
 
 ### People and screens
 
@@ -13,9 +25,19 @@ order without signing in. A guest has no playback or queue-management authority.
 _Avoid_: Admin, host, account holder.
 
 **Admin**:
-An authorized operator who controls playback and edits the shared queue,
-including selecting a queued song to play immediately.
+The first Guest to claim room authority. This primary operator controls playback
+and the queue, and is the only person who grants or revokes Controller authority.
 _Avoid_: Guest, player.
+
+**Controller**:
+A participant given playback and queue-management authority by the Admin.
+A Controller cannot grant or revoke anyone else's authority.
+_Avoid_: Primary Admin, Player.
+
+**Participant**:
+A person who joined a Session, identified by their browser credential and
+nickname. They remain listed while offline until the Session ends.
+_Avoid_: Nickname as proof of identity.
 
 **Player**:
 The designated screen/device that plays the selected song through the venue's

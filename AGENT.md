@@ -1,13 +1,12 @@
 # Agent guide
 
-Maintain Event Music System as a shared jukebox: one TV/TV Box plays music,
-guests request songs from phones, and an authenticated admin manages playback.
+Maintain independent temporary jukebox rooms: each has one designated TV/TV Box
+Player, guests requesting songs, and authorized admins managing playback.
 Extend the existing implementation and preserve that workflow.
 
 Read [CONTEXT.md](CONTEXT.md) when naming or changing domain concepts. Read
 [README.md](README.md) for configuration, HTTP/WebSocket payloads, and the
-manual test procedure. `CLAUDE.md` describes an older version; its statements
-about authentication, charts, and available tests need checking against current code.
+manual test procedure.
 
 ## Working sequence
 
@@ -29,19 +28,20 @@ There is no frontend bundler or compilation step.
 
 | Location | Responsibility |
 | --- | --- |
-| `server.js` | Environment loading, authentication, HTTP request pipeline, WebSocket dispatch/broadcast, persisted settings |
+| `server.js` | Environment loading, authentication, HTTP request pipeline, room-scoped WebSocket dispatch/broadcast |
+| `src/sessions.js` | Room lifecycle, membership and roles and in-memory credentials |
 | `src/state.js` | `JukeboxState`: authoritative queue, current track, history, pause state, volume |
 | `src/youtube.js` | YouTube Music search/country charts, oEmbed checks, watch-page metadata |
 | `src/moderation.js` | Optional event-aware LLM content filter |
-| `public/host.*` | Player at `/`: YouTube IFrame, start gesture, QR, legacy host controls |
+| `public/host.*` | Player at `/`: YouTube IFrame, direct startup, QR visibility and room exit |
 | `public/guest.*` | Public search, Explore, song requests, queue display at `/guest` and `/explore` |
-| `public/admin.*` | Protected remote controls and queue editing at `/admin`; reuses Guest search/request scripts |
+| `public/admin.*` | Authorized remote controls and queue editing at `/a`; reuses Guest search/request scripts |
 | `public/i18n.js` | Shared UI dictionary and `t()` interpolation |
 | `scripts/test.mjs` | Isolated HTTP/WebSocket integration checks using Node assertions |
 
 ## State and authorization invariants
 
-- The server owns one `JukeboxState`. Browser snapshots are views; queue changes
+- Each live Session owns a `JukeboxState`. Browser snapshots are views; queue changes
   go through its methods and `onChange` broadcasts a full snapshot to all clients.
 - `queue` contains upcoming tracks only. `clear()` leaves the current track
   playing; `playNow(id)` replaces it with the selected queued item and retains
@@ -54,15 +54,17 @@ There is no frontend bundler or compilation step.
   work. The request limit is 50 upcoming tracks; history is capped at 100 items.
 - Playback state and volume belong to the server snapshot. Player applies them
   through the IFrame API; Admin remains a controller rather than an audio source.
-- `HOST_PASSWORD` gates Player/Admin pages, their direct `.html` paths, and
-  `/api/host-token`. An empty password disables privileged access with HTTP 503;
-  missing/wrong credentials with a configured password receive HTTP 401.
-- Every WebSocket starts read-only. Only a valid per-boot host token authorizes
-  control events; Guest remains able to search and request tracks without login.
-  Validate privileged payloads on the server even when the UI disables controls.
-- Queue, history, pause, and volume reset on server restart. Only filter state,
-  moderation mode, cooldown, and event description persist in `data/settings.json`;
-  saved values take precedence over their initial environment settings.
+- `HOST_PASSWORD` authorizes room creation only. The root page only creates rooms;
+  Guest entry uses a room number. Empty password disables creation.
+- Every WebSocket authenticates a room credential before receiving a snapshot.
+  Check membership on every command; only Player reports completion/errors, and
+  only the primary Admin grants/revokes Controller rights. Controllers manage playback
+  and settings, but cannot change roles. State messages trigger role redirects.
+- All room data is in memory. Last-disconnect starts the 60-minute idle deadline;
+  live connections cancel it, heartbeat removes dead ones, and restart clears all rooms.
+  Seed each room's settings from environment defaults. stdout logs only create/delete.
+- Room numbers may be reused; internal session IDs and credentials must prevent old
+  links or credentials entering a replacement room. Player exit deletes the room immediately.
 
 ## Integration and UI details
 
@@ -81,7 +83,8 @@ There is no frontend bundler or compilation step.
 - Keep user-facing UI Thai through the dictionary; preserve YouTube titles and
   artist names. Icon buttons retain Thai `title`/`aria-label`, keyboard access,
   and touch targets. Reacquire pointer capture after moving a dragged row in the DOM.
-- Player needs a start gesture for browser audio. Preserve playback-error handling,
+- Player opens after creation without a start overlay. Handle autoplay blocking with
+  the existing play button without skipping tracks. Preserve playback-error handling,
   the watchdog's hidden-tab/buffering exceptions, and reconnect authentication.
 - Keep static-asset revalidation and versioned page asset URLs; open clients and
   mobile browsers otherwise retain outdated scripts after deployment.
@@ -97,8 +100,7 @@ Use `bun run check-llm` only when intentionally checking a configured provider.
 
 For deployment changes, check `docker compose config --quiet`, build the image,
 and verify startup in an isolated container. Keep `.env` secrets out of commits.
-The Compose setup uses the external `reverseproxy` network, a settings volume,
-and `PUBLIC_URL` for the QR destination; the proxy must forward WebSocket upgrades.
+The Compose setup uses the external `reverseproxy` network, `PUBLIC_URL` for the QR destination; the proxy must forward WebSocket upgrades.
 
 The deployment workflow uses a self-hosted runner and triggers on pushes to
 `main` or manual dispatch. Preserve that trigger restriction: adding

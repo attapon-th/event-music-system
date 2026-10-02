@@ -180,34 +180,23 @@ export async function moderate(song, details = null, opts = {}) {
       signal: controller.signal,
     });
     if (!res.ok) {
-      const t = await res.text().catch(() => "");
-      console.warn(`[moderation] HTTP ${res.status} — failing open. ${t.slice(0, 200)}`);
+      await res.text().catch(() => "");
       return APPROVED;
     }
     const data = await res.json();
     const choice = data?.choices?.[0];
     const text = choice?.message?.content || "";
-    // Web plugin citations — logged so the server logs show which pages
-    // (ideally lyrics sites) each verdict was actually based on.
-    const sources = (choice?.message?.annotations || [])
-      .map((a) => a?.url_citation?.url)
-      .filter(Boolean);
-    if (sources.length) {
-      console.log(`[moderation] "${song.title}" web sources: ${sources.slice(0, 5).join(" ")}`);
-    }
     // If the provider's own safety layer censored the reply (finish_reason
     // "content_filter"), the topic itself is too sensitive for the model to
     // discuss — e.g. banned protest songs with Chinese-hosted models. That is
     // a REJECT, not a hiccup: fail closed here, unlike network errors.
     if (choice?.finish_reason === "content_filter") {
-      console.warn(`[moderation] provider content_filter — rejecting. ${text.slice(0, 150)}`);
       return { approved: false, reason: "เพลงนี้ไม่เหมาะกับงานนี้", moderated: true };
     }
     // No structured verdict (refusal prose, missing/invalid JSON): the model
     // dodged the question — reject. Only infrastructure failures fail open.
     const parsed = extractJson(text);
     if (!parsed || typeof parsed.approved !== "boolean") {
-      console.warn(`[moderation] no structured verdict — rejecting. ${text.slice(0, 150)}`);
       return { approved: false, reason: "เพลงนี้ไม่เหมาะกับงานนี้", moderated: true };
     }
     // The web plugin makes models append markdown citation links ("[youtube.com](https://…)");
@@ -228,10 +217,8 @@ export async function moderate(song, details = null, opts = {}) {
     // can simply tap again; if the provider is truly down the host can toggle the
     // filter off live. Network errors below still fail open.
     if (err?.name === "AbortError") {
-      console.warn(`[moderation] timeout after ${timeoutMs}ms — rejecting (guest may retry).`);
       return { approved: false, reason: "ระบบกำลังยุ่ง กรุณาลองใหม่", moderated: false };
     }
-    console.warn(`[moderation] error — failing open. ${err?.message || ""}`);
     return APPROVED;
   } finally {
     clearTimeout(timer);

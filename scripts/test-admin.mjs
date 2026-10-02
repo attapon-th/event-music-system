@@ -1,0 +1,60 @@
+// Run the actual Admin script to check the roster and settings controls.
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createContext, runInContext } from "node:vm";
+const nodes = new Map();
+function element(id = "") {
+  const selectors = new Map();
+  const attrs = new Map();
+  return { id, children: [], dataset: {}, disabled: false, value: "100", textContent: "",
+    classList: { add() {}, remove() {} },
+    setAttribute(key, value) { attrs.set(key, value); },
+    getAttribute: key => attrs.get(key),
+    append(...children) { this.children.push(...children); },
+    appendChild(child) { this.children.push(child); },
+    replaceChildren(...children) { this.children = children; },
+    set innerHTML(value) { this.children = []; this.markup = value; },
+    querySelector(selector) { if (!selectors.has(selector)) selectors.set(selector, element()); return selectors.get(selector); },
+  };
+}
+const node = id => { if (!nodes.has(id)) nodes.set(id, element(id)); return nodes.get(id); };
+let handlers;
+const sent = [];
+const context = createContext({
+  document: { getElementById: node, createElement: () => element(), querySelectorAll: () => [], querySelector: () => element() },
+  Room: { code: "123", ready: Promise.resolve(true), connect(value) { handlers = value; }, send: value => sent.push(JSON.parse(JSON.stringify(value))) },
+  renderQueue() {}, NO_THUMB: "", confirm: () => true,
+});
+const source = ["i18n.js", "admin.js"].map(file => readFileSync(new URL(`../public/${file}`, import.meta.url), "utf8")).join("\n");
+runInContext(source, context);
+await Promise.resolve();
+const state = { nowPlaying: null, queue: [], paused: false, volume: 100 };
+const participants = [
+  { id: "player", name: "Player", role: "player", online: true },
+  { id: "owner", name: "ผู้ดูแล", role: "admin", online: true },
+  { id: "guest", name: "ผู้ฟัง", role: "guest", online: false },
+  { id: "helper", name: "ผู้ช่วย", role: "controller", online: true },
+];
+handlers.onAuth({ role: "admin" });
+handlers.onState({ state, code: "123", memberId: "owner", primaryAdminId: "owner", role: "admin", participants,
+  filterOn: false, moderationMode: "default", cooldownSeconds: 15 });
+assert.equal(node("admin-title").textContent, "ผู้ดูแลเพลง · ห้อง 123");
+const list = node("participants-list");
+assert.equal(list.children.length, 4, "roster includes online and offline members");
+assert.equal(list.children[0].children.length, 1, "Player rights cannot be assigned");
+assert.equal(list.children[1].children.length, 1, "primary Admin cannot revoke their own role");
+assert.match(list.children[2].children[0].textContent, /ผู้ฟัง.*ออฟไลน์/);
+list.children[2].children[1].onclick();
+assert.deepEqual(sent.at(-1), { type: "setParticipantRole", id: "guest", enabled: true });
+list.children[3].children[1].onclick();
+assert.deepEqual(sent.at(-1), { type: "setParticipantRole", id: "helper", enabled: false });
+node("admin-filter").onclick();
+assert.deepEqual(sent.at(-1), { type: "setFilter", on: true, mode: "default" });
+node("admin-cooldown").onclick();
+assert.deepEqual(sent.at(-1), { type: "setCooldown", seconds: 30 });
+handlers.onState({ state, code: "123", memberId: "helper", primaryAdminId: "owner", role: "controller", participants,
+  filterOn: true, moderationMode: "default", cooldownSeconds: 30 });
+assert.ok(list.children.every(row => row.children.length === 1), "Controller has no grant/revoke UI");
+node("admin-filter").onclick();
+assert.deepEqual(sent.at(-1), { type: "setFilter", on: true, mode: "strict" });
+console.log("PASS: Admin/Controller roster, online/offline names, primary-only role controls, filter/cooldown (DOM simulated).");

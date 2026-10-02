@@ -6,14 +6,16 @@ import { createContext, runInContext } from "node:vm";
 const publicDir = new URL("../public/", import.meta.url);
 const html = readFileSync(new URL("host.html", publicDir), "utf8");
 assert.equal(html.includes('href="/admin"'), false, "Admin link belongs on Guest only");
-assert.equal(readFileSync(new URL("guest.html", publicDir), "utf8").includes('href="/admin"'), true);
+assert.equal(readFileSync(new URL("guest.html", publicDir), "utf8").includes('href="/admin"'), false);
 
 for (const earlyReady of [false, true]) {
   const nodes = new Map();
   const calls = [];
   let state = -1;
   let apiReady;
+  let playerEvents;
   const messages = [];
+  const timers = [];
   const listeners = {};
   const document = {
     activeElement: null,
@@ -54,10 +56,22 @@ for (const earlyReady of [false, true]) {
   };
   const context = createContext({
     document, location: { protocol: "http:", host: "localhost" },
-    addEventListener() {}, setTimeout: () => 1, clearTimeout() {},
+    addEventListener() {}, setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {},
     fetch: async () => ({ ok: true, json: async () => ({ token: "test-token", guestUrl: "http://localhost/guest" }) }),
     WebSocket: class { readyState = 1; send(data) { messages.push(JSON.parse(data)); } },
   });
+  context.Room = {
+    ready: Promise.resolve(true), token: "test-token",
+    fetch: async () => ({ code: "123", guestUrl: "http://localhost/guest", filterOn: false, moderationMode: "default" }),
+    send: (message) => messages.push(message),
+    connect(handlers) {
+      return { onmessage({ data }) {
+        const msg = JSON.parse(data);
+        if (msg.type === "state") handlers.onState({ filterOn: false, moderationMode: "default", cooldownSeconds: 15, eventContext: "", ...msg });
+        if (msg.type === "sessionEnded") handlers.onEnd();
+      } };
+    },
+  };
   context.window = context;
   for (const [, src] of html.matchAll(/<script src="([^"]+)"/g)) {
     if (src.startsWith("https://www.youtube.com/")) {
@@ -65,6 +79,7 @@ for (const earlyReady of [false, true]) {
         PlayerState: { PLAYING: 1, PAUSED: 2, ENDED: 0, BUFFERING: 3 },
         Player: function (id, options) {
           calls.push(["init", id]);
+          playerEvents = options.events;
           this.loadVideoById = (videoId) => calls.push(["load", videoId]);
           this.setVolume = (volume) => calls.push(["volume", volume]);
           this.playVideo = () => { state = 1; calls.push(["play"]); };
@@ -77,7 +92,7 @@ for (const earlyReady of [false, true]) {
       };
       apiReady = () => context.onYouTubeIframeAPIReady?.();
       if (earlyReady) apiReady();
-    } else {
+    } else if (src !== "/session.js") {
       runInContext(readFileSync(new URL(src.slice(1), publicDir), "utf8"), context);
     }
   }
@@ -89,16 +104,15 @@ for (const earlyReady of [false, true]) {
     listeners.keydown(event);
     return event;
   };
-  assert.equal(document.activeElement.id, "start-btn", "Remote can start without a mouse");
+  assert.equal(document.activeElement.id, "playpause", "Player opens without a start screen");
   runInContext(`ws.onmessage({ data: JSON.stringify({ type: "state", state: {
     nowPlaying: { videoId: "song0000001", title: "Test", channel: "Artist" },
     queue: [], paused: false, volume: 37
   } }) });`, context);
-  press("Unidentified", { keyCode: 23 });
   assert.equal(document.activeElement.id, "playpause");
   assert.equal(calls.filter(([action]) => action === "init").length, 1, `API ready ${earlyReady ? "before" : "after"} Host script: initialize one player`);
-  assert.ok(calls.some(([action, id]) => action === "load" && id === "song0000001"), "Start must load the current song");
-  assert.equal(state, 1, "Start must play the current song");
+  assert.ok(calls.some(([action, id]) => action === "load" && id === "song0000001"), "Auto start must load the current song");
+  assert.equal(state, 1, "Auto start must play the current song");
   runInContext("latestState.paused = true; syncPlayer();", context);
   assert.equal(state, 2);
   runInContext("latestState.paused = false; syncPlayer();", context);
@@ -106,6 +120,20 @@ for (const earlyReady of [false, true]) {
   assert.ok(calls.some(([action, volume]) => action === "volume" && volume === 37));
   assert.equal(document.getElementById("player").getAttribute("tabindex"), "-1");
   const play = document.getElementById("playpause");
+  state = -1;
+  playerEvents.onAutoplayBlocked();
+  const blockedMessages = messages.length;
+  timers.at(-1)();
+  assert.equal(messages.length, blockedMessages, "Autoplay blocking does not skip the song");
+  assert.equal(runInContext("autoplayBlocked", context), true);
+  const beforeBlockedClick = messages.length;
+  play.click();
+  assert.equal(state, 1, "Existing play button unlocks blocked audio");
+  assert.equal(messages.length, beforeBlockedClick, "Unlocking audio must not pause the server queue");
+  document.getElementById("qr-toggle").click();
+  assert.equal(document.getElementById("qr-card").hidden, true);
+  document.getElementById("qr-toggle").click();
+  assert.equal(document.getElementById("qr-card").hidden, false);
   const skip = document.getElementById("skip");
   const volume = document.getElementById("volume");
   for (const [index, node] of [play, skip, volume].entries()) {
@@ -164,5 +192,7 @@ for (const earlyReady of [false, true]) {
   assert.equal(document.activeElement.dataset.queueId, "queued-1", "Queue broadcasts preserve remote selection");
   runInContext("latestState.queue = []; render();", context);
   assert.equal(document.activeElement, skip, "Removing focused track returns focus to a visible control");
+  runInContext('ws.onmessage({data: JSON.stringify({type: "sessionEnded"})})', context);
+  assert.equal(state, -1, "Revoked Player stops audio");
 }
 console.log("PASS: Host playback load orders, remote focus/OK/media keys, native/fallback fullscreen. YouTube and browser simulated.");

@@ -1,0 +1,12 @@
+.session-panel { margin: 16px auto; padding: 16px; max-width: 600px; background: #241c28; color: #fff; border: 1px solid #51434f; border-radius: 14px; font: 16px/1.6 sans-serif; }
+.session-panel[hidden], .session-panel [hidden], #room-content[hidden] { display: none !important; }
+.session-panel form { display: grid; gap: 12px; margin-top: 16px; }
+.session-panel label { display: grid; gap: 6px; }
+.session-panel input, .session-panel button { min-height: 44px; padding: 10px; font: inherit; border: 1px solid #766373; border-radius: 8px; }
+.session-panel input { width: 100%; color: #fff; background: #312735; }
+.session-panel button { cursor: pointer; background: #e8bc62; color: #211827; }
+.session-panel button:disabled { opacity: .55; cursor: default; }
+.session-panel :focus-visible { outline: 3px solid #e8bc62; outline-offset: 3px; }
+#room-error { color: #ffcca6; overflow-wrap: anywhere; }
+
+body[data-screen="player"][data-room-active="false"] { overflow-y: auto; }

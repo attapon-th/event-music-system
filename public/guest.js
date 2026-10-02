@@ -9,11 +9,16 @@ const backToExploreBtn = document.getElementById("back-to-explore");
 
 // Shared tabs keep both panels mounted so search and live queue survive switching.
 const pageTabs = [document.getElementById("search-tab"), document.getElementById("queue-tab")];
+const pagePanels = ["search-panel", "queue-panel"];
+if (document.body.dataset.admin === "true") {
+  pageTabs.push(document.getElementById("participants-tab"));
+  pagePanels.push("participants-panel");
+}
 function selectPageTab(index) {
   pageTabs.forEach((tab, i) => {
     tab.setAttribute("aria-selected", String(i === index));
     tab.tabIndex = i === index ? 0 : -1;
-    document.getElementById(i === 0 ? "search-panel" : "queue-panel").hidden = i !== index;
+    document.getElementById(pagePanels[i]).hidden = i !== index;
   });
 }
 pageTabs.forEach((tab, index) => {
@@ -21,7 +26,8 @@ pageTabs.forEach((tab, index) => {
   tab.onkeydown = (event) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
-    const next = event.key === "Home" ? 0 : event.key === "End" ? 1 : 1 - index;
+    const next = event.key === "Home" ? 0 : event.key === "End" ? pageTabs.length - 1
+      : (index + (event.key === "ArrowLeft" ? -1 : 1) + pageTabs.length) % pageTabs.length;
     selectPageTab(next);
     pageTabs[next].focus();
   };
@@ -426,12 +432,11 @@ async function requestSong(song, btn) {
   // Subline names the song: several checks can be in flight at once.
   const notice = toast("info", "🔎", t("Checking song…"), { persist: true, sub: song.title, checking: true });
   try {
-    const res = await fetch("/api/request", {
+    const data = await Room.fetch("/api/request", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...song, name: nickname, clientId }),
     });
-    const data = await res.json();
     if (data.ok) {
       const main = data.position === 0 ? t("Added — now playing") : t("position", { position: data.position });
       const sub = data.position === 0 ? t("Added — playing now!") : t("position", { position: data.position });
@@ -525,16 +530,10 @@ function cooldownToast(seconds) {
 let lastQueueState = null; // kept so the You badge can re-render after an add
 
 function connectWs() {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}`);
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.type === "state") {
-      lastQueueState = msg.state;
-      renderQueue(msg.state);
-    }
-  };
-  ws.onclose = () => setTimeout(connectWs, 2000);
+  Room.connect({ onState(msg) {
+    lastQueueState = msg.state;
+    renderQueue(msg.state);
+  } });
 }
 
 function renderQueue(state) {
@@ -587,5 +586,8 @@ function renderQueue(state) {
 }
 
 renderSingers();
-selectGenre("All"); // country charts + songs on first load for Guest and Admin
-if (document.body.dataset.admin !== "true") connectWs();
+Room.ready.then((joined) => {
+  if (!joined) return;
+  selectGenre("All");
+  if (document.body.dataset.admin !== "true") connectWs();
+});

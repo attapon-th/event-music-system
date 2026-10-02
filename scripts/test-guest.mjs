@@ -41,8 +41,10 @@ const context = createContext({
   document, crypto: { randomUUID: () => "test-client" },
   localStorage: { getItem: (key) => storage.get(key), setItem: (key, value) => storage.set(key, value) },
 });
+context.Room = { ready: Promise.resolve(true), fetch: async (...args) => (await context.fetch(...args)).json() };
 const source = ["i18n.js", "guest.js"].map((file) => readFileSync(new URL(`../public/${file}`, import.meta.url), "utf8")).join("\n");
 runInContext(source, context);
+await Promise.resolve();
 const run = (code) => runInContext(code, context);
 assert.equal(run("searchMode"), "videos", "Guest and Admin default to music videos");
 assert.equal(new URL(initialRequests[0], "http://localhost").searchParams.get("mode"), "videos", "Initial recommendations use music-video mode");
@@ -86,6 +88,10 @@ document.getElementById("queue-tab").onkeydown({ key: "Home", preventDefault() {
 assert.equal(document.getElementById("search-panel").hidden, false);
 assert.equal(document.getElementById("queue-panel").hidden, true);
 assert.equal(document.getElementById("search-tab").focused, true);
+run("selectPageTab(2)");
+assert.equal(document.getElementById("participants-panel").hidden, false);
+assert.equal(document.getElementById("search-panel").hidden, true);
+run("selectPageTab(0)");
 for (const page of ["guest", "admin"]) {
   const html = readFileSync(new URL(`../public/${page}.html`, import.meta.url), "utf8");
   assert.match(html, /id="search-panel" role="tabpanel"/);
