@@ -53,19 +53,19 @@ globalThis.fetch = async (url, options) => {
   assert.equal(body.context.client.gl, process.env.DEFAULT_REGION || 'TH');
   assert.equal(body.context.client.hl, (process.env.DEFAULT_LOCALE || 'th-TH').split('-')[0]);
   if (String(url).includes('/next?')) {
-    assert.equal(body.playlistId, 'RDAMVM' + body.videoId);
-    assert.equal(body.params, 'wAEB');
+    assert.equal(new URL(url).origin, 'https://www.youtube.com');
+    assert.equal(body.context.client.clientName, 'WEB');
+    assert.equal(body.isAudioOnly, undefined);
+    assert.equal(body.playlistId, undefined);
     if (body.videoId === 'wait0000001') {
-      writeFileSync(new URL('./radio-started', import.meta.url), 'yes');
+      writeFileSync(new URL('./recommendations-started', import.meta.url), 'yes');
       await new Promise(resolve => setTimeout(resolve, 200));
     }
-    const contents = [body.videoId, 'auto0000001', 'auto0000002', 'auto0000003'].map(videoId => ({
-      playlistPanelVideoRenderer: { videoId, title: {simpleText: 'Radio ' + videoId},
+    const results = [body.videoId, 'auto0000001', 'auto0000002', 'auto0000003'].map(videoId => ({
+      compactVideoRenderer: { videoId, title: {simpleText: 'Recommended ' + videoId},
         shortBylineText: {runs:[{text:'Artist'}]}, lengthText: {simpleText:'3:20'} }
     }));
-    return Response.json({contents:{singleColumnMusicWatchNextResultsRenderer:{tabbedRenderer:{watchNextTabbedResultsRenderer:{
-      tabs:[{tabRenderer:{content:{musicQueueRenderer:{content:{playlistPanelRenderer:{contents}}}}}}]
-    }}}}});
+    return Response.json({contents:{twoColumnWatchNextResults:{secondaryResults:{secondaryResults:{results}}}}});
   }
   if (String(url).includes('www.youtube.com/youtubei')) {
     assert.equal(body.context.client.clientName, 'WEB');
@@ -181,15 +181,20 @@ try {
   assert.match(roomA.code, /^[1-9][0-9]{2}$/);
   assert.notEqual(roomA.code, roomB.code);
   const joinMember = async (room, token) => (await post("/api/sessions/join", { code: room.code, sessionId: room.sessionId }, token)).json();
-  const memberA = await joinMember(roomA);
-  const memberA2 = await joinMember(roomA);
+  const [memberA, memberA2] = await Promise.all([joinMember(roomA), joinMember(roomA)]);
+  assert.deepEqual([memberA.role, memberA2.role].sort(), ["admin", "guest"], "concurrent joins assign exactly one automatic Admin");
+  const adminB = await joinMember(roomB);
+  assert.equal(adminB.role, "admin", "each room's first participant becomes its own Admin");
   const memberB = await joinMember(roomB);
+  assert.equal(memberB.role, "guest");
   requestToken = memberA.token;
-  const claims = await Promise.all([post("/api/sessions/admin/claim", {}, memberA.token), post("/api/sessions/admin/claim", {}, memberA2.token)]);
-  assert.deepEqual(claims.map(r => r.status).sort(), [200, 403]);
-  const winner = claims[0].ok ? memberA : memberA2;
-  const loser = claims[0].ok ? memberA2 : memberA;
+  const winner = [memberA, memberA2].find(member => member.role === "admin");
+  const loser = [memberA, memberA2].find(member => member.role === "guest");
   const adminToken = winner.token;
+  assert.equal((await post("/api/sessions/admin/claim", {}, loser.token)).status, 404, "manual Admin claiming has been removed");
+  const ownerInfo = await (await fetch(base + "/api/info", { headers: auth(adminToken) })).json();
+  assert.equal(ownerInfo.primaryAdminId, winner.memberId);
+  assert.equal((await joinMember(roomA, roomA.token)).role, "guest", "a Player token cannot replace the first Admin");
   assert.equal((await joinMember(roomA, adminToken)).role, "admin", "locked room preserves Admin credentials");
   assert.equal((await joinMember(roomB, adminToken)).role, "guest", "cross-room token cannot grant Admin");
   assert.equal((await fetch(base + "/api/info", { headers: { ...auth(adminToken), "X-Session-Id": roomB.sessionId } })).status, 401);
@@ -217,8 +222,11 @@ try {
   }
   const karaokeBrowse = (await (await fetch(base + "/api/browse?q=__hits&mode=karaoke")).json()).results;
   assert.equal(karaokeBrowse.length, 1, "browse excludes compilations");
-  assert.equal(karaokeBrowse[0].title, "เพลงไทยยอดนิยม karaoke");
-  assert.equal((await (await fetch(base + "/api/browse?q=__hits")).json()).results[0].title, "Thailand chart", "mode caches stay separate");
+  assert.equal(karaokeBrowse[0].title, "Thailand chart", "recommendations use the country chart even in karaoke mode");
+  for (const mode of ["songs", "karaoke", "videos"]) {
+    const chart = (await (await fetch(base + `/api/browse?q=__hk_hits&mode=${mode}`)).json()).results;
+    assert.deepEqual(chart, karaokeBrowse, "both chart sentinels use the same chart in every mode");
+  }
   const videos = (await (await fetch(base + "/api/search?q=Bruno%20Mars&mode=videos")).json()).results;
   assert.deepEqual(videos.map(({ videoId, duration }) => ({ videoId, duration })), [
     { videoId: "live0000001", duration: "" },
@@ -239,6 +247,11 @@ try {
   const player = await socket(roomA.token);
   const otherRoom = await socket(memberB.token);
   const otherPlayer = await socket(roomB.token);
+  assert.equal(player.snapshot.autoQueue, true, "new rooms enable Auto Queue by default");
+  assert.equal(otherPlayer.snapshot.autoQueue, true, "every new room starts with Auto Queue enabled");
+  assert.equal(admin.messages.at(-1).cooldownSeconds, 5, "new rooms wait five seconds between requests");
+  send(otherPlayer, "setAutoQueue", { enabled: false });
+  await waitFor(() => !otherPlayer.snapshot.autoQueue && !otherRoom.snapshot.autoQueue);
   send(admin, "setParticipantRole", { id: loser.memberId, enabled: true });
   await waitFor(() => guest.messages.at(-1)?.role === "controller");
   assert.equal("participants" in guest.messages.at(-1), false, "Controllers receive no participant roster");
@@ -249,6 +262,8 @@ try {
   await waitFor(() => guest.messages.filter(m => m.type === "error").length > errorsBefore);
   send(guest, "setVolume", { volume: 29 });
   await waitFor(() => admin.snapshot.volume === 29);
+  send(guest, "setAutoQueue", { enabled: false });
+  await waitFor(() => !admin.snapshot.autoQueue && !player.snapshot.autoQueue);
   send(guest, "setAutoQueue", { enabled: true });
   await waitFor(() => admin.snapshot.autoQueue && player.snapshot.autoQueue);
   send(admin, "setAutoQueue", { enabled: false });
@@ -277,7 +292,7 @@ try {
     assert.deepEqual(guest.snapshot, admin.snapshot);
     assert.deepEqual(player.snapshot, admin.snapshot);
   };
-  assert.equal(otherRoom.messages.at(-1).cooldownSeconds, 15, "settings are room-scoped");
+  assert.equal(otherRoom.messages.at(-1).cooldownSeconds, 5, "settings are room-scoped");
   assert.equal("participants" in otherRoom.messages.at(-1), false, "Guest cannot read the participant roster");
   assert.equal(otherRoom.snapshot.queue.length, 0);
   assert.equal(otherRoom.snapshot.volume, 60);
@@ -413,11 +428,11 @@ try {
   await waitFor(() => otherRoom.snapshot.nowPlaying?.videoId === "main0000001" && otherRoom.snapshot.autoQueueStatus === "ready");
   send(otherPlayer, "ended", { videoId: "main0000001" });
   await waitFor(() => otherRoom.snapshot.nowPlaying?.videoId === "auto0000002");
-  // Close the room with a radio response in flight; no late reply can recreate it.
-  assert.equal((await post("/api/request", { videoId: "wait0000001", title: "Pending radio", clientId: "radio-close" }, memberB.token)).status, 200);
+  // Close the room with a recommendation response in flight; no late reply can recreate it.
+  assert.equal((await post("/api/request", { videoId: "wait0000001", title: "Pending recommendations", clientId: "recommendations-close" }, memberB.token)).status, 200);
   await waitFor(() => otherRoom.snapshot.queue.some(item => item.videoId === "wait0000001"));
   send(otherPlayer, "playNow", { id: otherRoom.snapshot.queue[0].id });
-  await waitFor(() => existsSync(join(temp, "radio-started")));
+  await waitFor(() => existsSync(join(temp, "recommendations-started")));
   assert.equal((await post("/api/sessions/close", {}, roomB.token)).status, 200);
   await new Promise(resolve => setTimeout(resolve, 250));
   await waitFor(() => otherRoom.messages.some(msg => msg.code === "ROOM_CLOSED"));
@@ -507,7 +522,7 @@ try {
   assert.equal(changes, 0);
   assert.equal(state.reorder([]), true);
   assert.equal(existsSync(join(temp, "unexpected-ai-request")), false, "requests never call AI or fetch moderation metadata");
-  console.log("PASS: isolated rooms/queues/settings; primary Admin/Controller grant/revoke; Auto Queue authorization/sync/refresh/priority/closing; heartbeat/expiry/in-flight requests; restart; lifecycle logs; rate limits; queue controls; Thailand search; unmodified video queries/order; AI disabled; validation.");
+  console.log("PASS: concurrent joins assign one automatic Admin per room; isolated rooms/queues/settings; primary Admin/Controller grant/revoke; Auto Queue authorization/sync/refresh/priority/closing; heartbeat/expiry/in-flight requests; restart; lifecycle logs; rate limits; queue controls; Thailand search; unmodified video queries/order; AI disabled; validation.");
 } finally {
   for (const ws of sockets) ws.terminate();
   if (child && child.exitCode === null) { child.kill(); await once(child, "exit"); }

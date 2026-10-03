@@ -25,7 +25,8 @@ order without signing in. A guest has no playback or queue-management authority.
 _Avoid_: Admin, host, account holder.
 
 **Admin**:
-The first Guest to claim room authority. This primary operator controls playback
+The first person to join by room number or QR link, automatically given room authority.
+This primary operator controls playback
 and the queue, and is the only person who grants or revokes Controller authority.
 _Avoid_: Guest, player.
 
@@ -78,7 +79,7 @@ song. The current song is outside the Queue.
 _Avoid_: Now Playing, playback history, separate admin playlist.
 
 **Auto Queue**:
-An optional room setting that plays recommendations based on the latest song
+A room setting, enabled by default, that plays regular YouTube video recommendations based on the latest song
 when no requested songs remain. Requested songs take priority after the current
 automatic song finishes; turning the setting off leaves that song playing.
 _Avoid_: YouTube account personalization, adding recommendations to the request Queue.
@@ -116,13 +117,14 @@ song and its playback state.
 _Avoid_: Stop playback, erase history.
 
 **Explore**:
-Song discovery through country charts, genres, and artist suggestions before
-or alongside a specific search. Its country preference does not limit song language.
+Song discovery through the configured country's chart, with shuffle
+and five-song batches and no category buttons. Every search mode shows the same chart; search
+mode controls specific searches. Its country preference does not limit song language.
 _Avoid_: Thai-only catalog, personal recommendations.
 
 **Request cooldown**:
 A waiting period between song-request attempts that require availability
-checks from a guest device. It is not the delay until a song will play.
+checks from a guest device, five seconds by default. It is not the delay until a song will play.
 _Avoid_: Queue waiting time, playback delay.
 
 **Content filter**:

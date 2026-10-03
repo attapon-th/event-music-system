@@ -32,14 +32,13 @@ Built for a real graduation dinner in Hong Kong; designed to work for any event.
 - 📱 **Zero-friction requests** — scan QR → search → tap. No app, no login.
 - 🔑 **No YouTube API key** — search scrapes the public results page; playback
   uses the standard embedded player.
-- 🎤 **Explore** — Thailand charts load first (TH/th-TH), with Thai pop, luk thung,
-  phuea chiwit, luk krung, rock, indie and hip-hop alongside international genres.
-  Artist chips are retained but hidden.
+- 🎤 **Explore** — shows the configured country's charts (TH/th-TH by default)
+  in every search mode, with shuffle and five-song batches.
 - 🎛 **Live controls** — play/pause/skip, volume and remove tracks on Player/Admin;
-  per-guest request cooldown on Admin. Each room has independent settings, queue and playback, held only in memory.
-- 🔁 **Auto Queue** — optional YouTube Music radio after requested songs run out;
+  per-guest request cooldown (five seconds by default) on Admin. Each room has independent settings, queue and playback, held only in memory.
+- 🔁 **Auto Queue** — enabled by default, with YouTube video recommendations after requested songs run out;
   Player/Admin can toggle it, and new requests play after the current automatic song finishes.
-- 🔒 **Rooms** — three-digit codes and direct QR entry. `HOST_PASSWORD` creates rooms, only. The first Admin assigns/revokes Controller rights. Guest/Admin join by room number.
+- 🔒 **Rooms** — three-digit codes and direct QR entry. `HOST_PASSWORD` creates rooms, only. The first participant automatically becomes Admin and assigns/revokes Controller rights. Later participants join as Guests.
 - 📲 **Installable** — qp music-note icon, Chrome desktop/Android installation and
   iPhone/iPad Add to Home Screen. Opens the shared entry screen as a standalone app.
 - 🛡 **Queue guardrails** — duplicate rejection, per-phone cooldown (works
@@ -67,8 +66,9 @@ bun start
 Open **http://localhost:45416/** on the machine, drag it to the projector, and
 press **เริ่มเล่น**, enter the creation password (`HOST_PASSWORD`, digits `0–9` only, at least four digits)
 or an existing three-digit room number, then press the arrow icon. The password
-creates a room and opens Player; a room number joins Guest, preserving any saved
-Admin/Controller role. The entry displays digits openly and uses a numeric keyboard
+creates a room and opens Player; a room number joins the room, preserving any saved
+Admin/Controller role. The first participant goes straight to Admin at `/a`;
+later participants enter Guest. The entry displays digits openly and uses a numeric keyboard
 on mobile. Empty, shorter, or nonnumeric passwords prevent server startup; replace
 any existing nonnumeric password before restarting. Leading zeros are preserved.
 New rooms start at **60% volume**. If the browser blocks audio, use its existing
@@ -97,8 +97,7 @@ play button. Guests can also scan the QR or join directly at `/guest`.
 | `/a` | Admin/Controller controls, queue editing and participant roster |
 | `/g` | Redirect to `/guest`, preserving room/session query parameters |
 | `POST /api/sessions` | `{ password }` → new room and Player credential |
-| `POST /api/sessions/join` | `{ code, sessionId? }` → Guest membership; reuses a valid member credential |
-| `POST /api/sessions/admin/claim` | First Guest claimant becomes the primary Admin |
+| `POST /api/sessions/join` | `{ code, sessionId? }` → first participant becomes Admin automatically, later participants become Guests; reuses a valid member credential |
 | `POST /api/sessions/close` | Player credential → delete room and disconnect everyone |
 | `GET /api/search?q=&mode=songs\|karaoke\|videos` | YouTube Music songs, karaoke or videos (no API key); video queries are unchanged and results keep YouTube order, including live and long videos |
 | `GET /api/browse?q=` | Cached, singles-only search behind the explore tabs |
@@ -228,7 +227,7 @@ changes last only for that Session.
 
 ```
 server.js                  Express + room-scoped WebSocket API and request pipeline
-src/youtube.js             No-key search/radio, oEmbed check, watch-page details
+src/youtube.js             No-key search/recommendations, oEmbed check, watch-page details
 src/auto-queue.js          Room-scoped recommendation preparation and late-reply guards
 src/moderation.js          Retained LLM content filter (paused; unused by the server)
 src/state.js               Authoritative in-memory queue
@@ -276,7 +275,9 @@ DEFAULT_LOCALE=th-TH
 ห้องมีเลข 3 หลัก (`100–999`) และ QR ผู้ฟัง scan QR เข้าห้องทันที
 หรือเปิด `/guest` กรอกเลขห้องโดยไม่ต้องเลือกบทบาท ไม่มีการรับช่วง Player ห้องเดิม
 
-Guest คนที่กด **รับสิทธิ์ Admin** ก่อนสำเร็จเป็น **ผู้ดูแลหลัก** และเข้าหน้า `/a`
+ผู้เข้าร่วมห้องคนแรกผ่าน QR หรือเลขห้องเป็น **ผู้ดูแลหลัก (Admin)** อัตโนมัติ และเข้าหน้า `/a` ทันที
+คนถัดไปเข้าหน้า Guest โดยไม่ต้องกดรับสิทธิ์; Player ที่สร้างห้องยังเป็นเครื่องเล่น
+Admin เดิมยังคงสิทธิ์เมื่อ refresh/reconnect หรือกลับเข้าห้อง และไม่มีการส่งต่อสิทธิ์เพราะออฟไลน์
 เฉพาะผู้ดูแลหลักเท่านั้นที่ให้หรือถอนสิทธิ์ **ผู้ช่วยควบคุม (Controller)** ผ่านแท็บผู้เข้าร่วม
 Controller ควบคุมเพลงและการตั้งค่าได้ มีเฉพาะแท็บค้นหา/คิว และไม่ได้รับรายชื่อผู้เข้าร่วม
 เมื่อได้รับสิทธิ์ browser เปลี่ยนไป `/a` ทันที; เมื่อถูกถอนกลับ `/guest` ทันที
@@ -285,7 +286,7 @@ Controller ควบคุมเพลงและการตั้งค่า
 
 Player ซ่อน/แสดงการ์ด QR ได้ และแสดงใต้ QR เป็น `ห้อง {rn} · yt1.lkzlab.uk/guest`
 ปุ่มประเภทงานบน Player ซ่อนไว้ หน้า `/a` ไม่มีปุ่มตัวกรองและซ่อนปุ่มล้างคิว
-ปุ่มเวลารอแสดงค่าในปุ่มโดยตรง ไม่มี label การตั้งค่าด้านล่าง ปุ่ม **ออก** ปิดห้องทันที
+เวลารอเพิ่มเพลงเริ่มต้นที่ **5 วินาที** ปุ่มเวลารอแสดงค่าในปุ่มโดยตรง ไม่มี label การตั้งค่าด้านล่าง ปุ่ม **ออก** ปิดห้องทันที
 และพาทุกคนกลับฟอร์มเลขห้อง (Player กลับหน้าเริ่ม)
 
 ข้อมูลทุกห้องอยู่ใน memory ของ server ลบหลังไม่มีอุปกรณ์เชื่อมต่อครบ 60 นาที
@@ -302,13 +303,14 @@ Guest/Controller แยก **ค้นหาเพลง** และ **คิว
 กดปุ่มโหมด **วีดีโอ / คาราโอเกะ / เพลง** ได้ในแท็บค้นหา โดย Guest/Admin เริ่มต้นที่ **วีดีโอ**: เพลงใช้ YouTube Music หมวด Songs
 ส่วนคาราโอเกะใช้วิดีโอ YouTube และเติมคำว่า `karaoke` หากคำค้นยังไม่มีคำนี้หรือ “คาราโอเกะ”
 วีดีโอส่งคำค้นเดิมไป YouTube โดยไม่เติมคำ ไม่กรองเนื้อหาหรือความยาว รวมไลฟ์และวิดีโอยาว และแสดงตามลำดับที่ YouTube ส่งกลับ โดยรับเฉพาะวิดีโอ ไม่รวมช่องหรือเพลย์ลิสต์
-เพลงแนะนำ/หมวด/ศิลปินยังตัดรายการที่ไม่ทราบความยาวหรือยาวเกิน 10 นาที และสุ่มลำดับเหมือนเดิม
-Guest และ Admin มีเพลงแนะนำ หมวดเพลง และปุ่มสุ่มเหมือนกัน ใช้โหมดที่เลือกด้วย ทุกโหมดเพิ่มเข้าคิวของห้องเดียวกันและเล่นบน Player ของห้องนั้น
-หมวดไทยเรียง **เพลงไทย → ไทยลูกทุ่ง → ไทยเพื่อชีวิต → ไทยลูกกรุง → ไทยร็อก → ไทยอินดี้ → ไทยฮิปฮอป** ตามด้วยหมวดต่างประเทศเดิม
-นำหมวด Graduation ออก และซ่อนรายชื่อศิลปินไว้ก่อน โดยยังเก็บข้อมูลและโค้ดไว้
+Guest และ Admin มีเพลงแนะนำจากชาร์ตประเทศตาม `DEFAULT_REGION` เหมือนกันทุกโหมด โดยไม่มีปุ่มหมวด “ทั้งหมด”
+ปุ่มโหมดใช้กับการค้นหา ส่วนปุ่มสุ่มใช้เฉพาะชาร์ตประเทศ ไม่มีหมวดหรือรายชื่อศิลปิน
+ชาร์ตตัดรายการที่ไม่ทราบความยาวหรือยาวเกิน 10 นาที สุ่มลำดับ และแสดงเพิ่มครั้งละ 5 เพลงจากผลที่โหลดแล้ว
+ทุกโหมดเพิ่มเข้าคิวของห้องเดียวกันและเล่นบน Player ของห้องนั้น
 `/api/search` และ `/api/browse` รองรับ `mode=songs` (ค่าเริ่มต้น) หรือ `mode=karaoke` / `mode=videos`
+คำค้น `__hits` และ `__hk_hits` ของ `/api/browse` ใช้ชาร์ตประเทศทุกโหมด โดยแชร์ cache 30 นาทีเดียวกัน
 
-Guest/Admin สุ่มชื่อเล่นภาษาไทยจาก 100 ชื่อ เก็บแยกตาม session ใน browser และแสดง “Music by {nickname}”
+Guest/Admin สุ่มชื่อเล่นภาษาไทยจาก 100 ชื่อ เก็บแยกตาม session ใน browser และแสดง `คิวเพลิน by "{nickname}"`
 เข้าห้องใหม่สุ่มชื่อใหม่ที่ต่างจากชื่อก่อนหน้า; refresh, reconnect หรือสลับ Guest/Admin ในห้องเดิมใช้ชื่อเดิม
 หน้า Guest ไม่มีข้อความ Add a Song และใช้ `/g` เพื่อ redirect ไป `/guest` ได้
 แท็บค้นหา/คิวมีไอคอน ช่องค้นหาใช้ตัวอักษร 16px และข้อความยาวตัดบรรทัดอยู่ในกรอบ
@@ -326,9 +328,11 @@ Admin แสดงชื่อเพลง รูป ระยะเวลาแ
 รวมถึงข้อมูลห้องและการตั้งค่าทั้งหมด แต่ละห้องใช้ Player หนึ่งเครื่องเป็นแหล่งเสียง
 
 ปุ่ม **เล่นต่ออัตโนมัติ: เปิด/ปิด** อยู่บน Player และ Admin; Controller ใช้ได้ด้วย
-ห้องใหม่เริ่มต้นเป็นปิด และ Guest เห็นสถานะโดยเปลี่ยนค่าไม่ได้ เมื่อเปิดและคิวหลักว่าง
-ระบบเตรียมเพลงแนะนำจาก YouTube Music Radio ของเพลงล่าสุดไว้หนึ่งเพลงแยกจากคิวหลัก
+ห้องใหม่เริ่มต้นเป็นเปิด และ Guest เห็นสถานะโดยเปลี่ยนค่าไม่ได้ เมื่อเปิดและคิวหลักว่าง
+ระบบเตรียมวิดีโอแนะนำจาก YouTube ปกติตามคลิปล่าสุดไว้หนึ่งคลิปแยกจากคิวหลัก โดยไม่ขึ้นกับโหมดค้นหา
 แล้วเล่นต่อเมื่อเพลงปัจจุบันจบ หากยังไม่เคยมีเพลง จะรอผู้ใช้เพิ่มเพลงแรก
+เลือกตามลำดับแนะนำ ตัดรายการซ้ำ ไลฟ์/ระยะเวลาไม่ทราบ และคลิปยาวเกิน 10 นาที พร้อมตรวจการเล่นได้
+คลิปเพลงภาพนิ่งยังเล่นได้หาก YouTube แนะนำมา; ระบบใช้รายการแนะนำปกติโดยไม่บังคับเสียงอย่างเดียว
 เพลงอัตโนมัติแสดงคำว่า **เพลงอัตโนมัติ** บนทุกหน้าจอ และคิวหลักยังนับเฉพาะคำขอของผู้ใช้
 หากมีคนเพิ่มเพลงขณะเพลงอัตโนมัติเล่นอยู่ เพลงปัจจุบันจะเล่นจบก่อน แล้วเล่นคิวหลักตามลำดับ
 ปิดปุ่มแล้วเพลงปัจจุบันเล่นต่อ แต่จะไม่เลือกเพลงอัตโนมัติถัดไป รีเฟรชหน้ายังคงค่าของห้อง
@@ -357,7 +361,7 @@ iPhone/iPad ใช้ปุ่ม **เพิ่มไปยังหน้า�
 โหลดชาร์ตประเทศ (`__hk_hits` ยังรองรับสำหรับ client เดิมและใช้ประเทศที่ตั้งค่า)
 
 Room APIs คืน `{ code, sessionId, token, role, memberId }` โดยไม่ใช้ `/api/host-token` หรือ Basic Auth
-ส่ง `Authorization: Bearer TOKEN` สำหรับ `/api/info`, `/api/request`, การรับ Admin และการปิดห้อง
+ส่ง `Authorization: Bearer TOKEN` สำหรับ `/api/info`, `/api/request`, การกลับเข้าห้องด้วยสิทธิ์เดิม และการปิดห้อง
 ส่ง `X-Session-Id` เพิ่มได้เพื่อยืนยันว่ากุญแจตรงกับห้องที่ต้องการ
 การกรอกเลขหรือรหัสผิดรวม 10 ครั้งต่อนาทีต่อ IP จะถูกปฏิเสธชั่วคราวด้วย HTTP 429
 ข้อผิดพลาดในการเข้าห้องคืน `retryIn: 5` สำหรับเวลารอส่งซ้ำบน browser
@@ -404,26 +408,29 @@ bun run test
 Admin/Player/Guest, reorder, ลบ, clear, play now, play/pause/skip/volume,
 refresh/reconnect, สิทธิ์ผู้ใช้/startup ที่รับเฉพาะรหัสตัวเลข 0–9 อย่างน้อย 4 หลัก, input validation,
 คำขอเพลงซ้ำพร้อมกัน และ country/locale ที่ส่งไป YouTube
-รวมหลายห้อง รับ Admin พร้อมกัน ให้/ถอน Controller กลับเข้า ปิดห้อง เลขซ้ำ ห้องเต็ม
+รวมหลายห้อง เข้าร่วมพร้อมกันแล้วได้ Admin อัตโนมัติเพียงคนเดียว ให้/ถอน Controller กลับเข้า ปิดห้อง เลขซ้ำ ห้องเต็ม
 หมดอายุ connection ที่ไม่ตอบ heartbeat คำขอที่ค้างตอนหมดอายุ และ log เฉพาะสร้าง/ลบห้อง
-รวม Auto Queue: แปลง Radio response, เตรียมเพลงนอกคิว, ให้คิวหลักมาก่อน, เล่นต่อหลายเพลง,
+รวม Auto Queue: แปลงวิดีโอแนะนำทั้ง lockupViewModel/compactVideoRenderer, ตรวจคำขอ WEB ที่ไม่บังคับเสียงอย่างเดียว,
+เตรียมเพลงนอกคิว, ให้คิวหลักมาก่อน, เล่นต่อหลายเพลง,
 ปิด/เปิดหรือเพิ่มเพลงขณะโหลด, pause ขณะรอ, ปิดห้องขณะโหลด, เพลงซ้ำและจำนวนครั้งลองที่จำกัด
 พร้อมตรวจปุ่มและสถานะบน Player/Admin/Guest โดยจำลอง YouTube และ DOM
 รวม disconnect ระหว่างเล่น, เล่นคิวต่อขณะ offline, reconnect พร้อมซิงก์เพลงที่จบโดยไม่เล่นซ้ำ,
 เพลงจบระหว่างรอ auth, ห้องหายแล้วรอคิวหมด, และชื่อใหม่เมื่อเปลี่ยน session
 รวมช่องเข้าห้องเดียว, เวลารอ 5 วินาที/HTTP 429, การข้ามแท็บผู้เข้าร่วมที่ถูกซ่อน,
-หมวดไทยใหม่, การซ่อนศิลปิน และ manifest/ขนาดไอคอน/flow ติดตั้งโดยจำลอง browser events
+เพลงแนะนำใช้ชาร์ตประเทศทุกโหมดโดยไม่มีปุ่มหมวด, การแบ่งผลชาร์ต/สุ่ม/กันซ้ำ/ลองใหม่ และ manifest/ขนาดไอคอน/flow ติดตั้งโดยจำลอง browser events
 
 ตรวจบน browser/TV จริงหลังตั้งค่า:
 
-1. สร้างสองห้อง ตรวจ Player เปิดทันที Scan QR และรับสิทธิ์ Admin ในแต่ละห้อง ตรวจว่าคิวไม่ปะปน
+1. สร้างสองห้อง ตรวจ Player เปิดทันที Scan QR คนแรกในแต่ละห้องต้องเปิดหน้า Admin อัตโนมัติ
+   คนถัดไปต้องเปิดหน้า Guest โดยไม่มีปุ่มรับสิทธิ์ ตรวจว่าคิวไม่ปะปนและ Admin กลับเข้าห้องแล้วคงสิทธิ์เดิม
 2. Guest ค้นหาและเพิ่ม 4 เพลง: เพลงแรกเริ่มเล่น และ Admin เห็นเพลงที่เหลือทันที
 3. ลาก queue บน Admin แล้วตรวจ Guest/Player ว่าแสดงลำดับเดียวกัน
 4. ลบเพลงหนึ่งรายการ แล้วกดเล่นตอนนี้กับเพลงที่รอ: Player ต้องเปลี่ยนเพลง
 5. กดหยุดชั่วคราว/เล่น/ข้าม และปรับเสียง: ตรวจเสียงกับภาพที่ TV
 6. รีเฟรช Admin: เพลง คิว สถานะ pause และ volume ต้องเหมือนเดิม
-   เปิดเล่นต่ออัตโนมัติบน Player/Admin ตรวจสถานะทั้งสามหน้าและห้องอื่น กดข้ามจนคิวหลักหมด
-   ต้องมีเพลงอัตโนมัติเล่นต่อ เพิ่มเพลงจาก Guest ระหว่างนั้น: เพลงใหม่ต้องเล่นหลังเพลงอัตโนมัติจบ
+   ตรวจว่าห้องใหม่เปิดเล่นต่ออัตโนมัติและเวลารอเพิ่มเพลง 5 วินาที ตรวจสถานะทั้งสามหน้าและห้องอื่น กดข้ามจนคิวหลักหมด
+   ต้องมีวิดีโออัตโนมัติจากรายการแนะนำ YouTube เล่นต่อ ตรวจภาพและเสียงบน TV
+   เพิ่มเพลงจาก Guest ระหว่างนั้น: เพลงใหม่ต้องเล่นหลังเพลงอัตโนมัติจบ
    ปิดปุ่มระหว่างโหลดและระหว่างเล่น ตรวจว่าเพลงปัจจุบันไม่ถูกหยุด และไม่มีเพลงอัตโนมัติถัดไป
 7. ตรวจปุ่มประเภทงานบน Player และล้างคิวบน Admin ถูกซ่อน ไม่มีปุ่มตัวกรอง
    ปุ่มเวลารอแสดงค่าปัจจุบันและเปลี่ยนค่าได้ ตรวจช่องค้นหาบน iPhone และเพลงชื่อยาวไม่ดันปุ่ม + ออกข้างจอ
@@ -445,7 +452,8 @@ refresh/reconnect, สิทธิ์ผู้ใช้/startup ที่รั�
     ถ้าตัดอินเทอร์เน็ตของ Player ด้วย ให้ตรวจเพลงกลับมาเล่นเมื่อเข้าถึง YouTube ได้อีกครั้ง
 13. เข้า Guest/Admin ห้องใหม่ตรวจชื่อสุ่มใหม่; refresh/reconnect ห้องเดิมตรวจชื่อไม่เปลี่ยน
 14. หน้าแรกกรอกเลขห้องเพื่อเข้า Guest และรหัสสร้างเพื่อเปิด Player ตรวจรหัสผิดนับถอยหลัง 5 วินาที
-    ลอง Enter ซ้ำระหว่างรอ และตรวจว่าแต่ละหมวดไทยค้นหาเพลงได้โดยไม่มีแถวศิลปิน
+    ลอง Enter ซ้ำระหว่างรอ และตรวจ Guest/Admin ไม่มีปุ่มหมวด “ทั้งหมด” หรือแถวศิลปิน
+    สลับทั้งสามโหมดโดยไม่ค้นหา: เพลงแนะนำยังเป็นชาร์ตประเทศ สุ่มและแสดงเพิ่มครั้งละ 5 เพลงได้
 15. ผู้ดูแลหลักมีไอคอนผู้เข้าร่วม; Controller ไม่มีแท็บหรือรายชื่อ และกดลูกศร/Home/End แล้วไม่เลือกแท็บที่ซ่อน
 16. ผ่าน HTTPS ทดลอง Install บน Chrome desktop/Android และแชร์ → เพิ่มไปยังหน้าจอโฮมบน Safari iOS
     ตรวจไอคอน qp ชื่อคิวเพลิน หน้าต่าง standalone เริ่มที่ `/` และปุ่มติดตั้งซ่อนในแอป

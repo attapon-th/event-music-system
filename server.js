@@ -56,7 +56,7 @@ const sessions = new Sessions({
   filterOn: false,
   moderationMode: "default",
   eventContext: "",
-  cooldownSeconds: 15,
+  cooldownSeconds: 5,
 });
 
 const app = express();
@@ -127,17 +127,6 @@ app.post("/api/sessions/join", checkAttempts, findRoom, (req, res) => {
   if (typeof req.body.name === "string" && req.body.name.trim()) member.name = req.body.name.trim().slice(0, 40);
   res.set("Cache-Control", "no-store").json(memberInfo(member));
 });
-app.post("/api/sessions/admin/claim", requireMember, (req, res) => {
-  const { member } = req;
-  if (member.role === "player") return res.status(403).json({ error: "กรุณาเข้าผ่านหน้า Guest เพื่อรับสิทธิ์ผู้ดูแล" });
-  if (member.role !== "admin") {
-    if (member.room.primaryAdminId) return res.status(403).json({ error: "ห้องนี้มีผู้ดูแลหลักแล้ว" });
-    member.role = "admin";
-    member.room.primaryAdminId = member.id;
-    broadcastState(member.room);
-  }
-  res.json(memberInfo(member));
-});
 app.post("/api/sessions/close", requireMember, (req, res) => {
   if (req.member.role !== "player") return res.status(403).json({ error: "เฉพาะ Player เท่านั้นที่ปิดห้องได้" });
   sessions.delete(req.member.room);
@@ -160,9 +149,7 @@ app.get("/api/info", requireMember, async (req, res) => {
   }
 });
 
-// Explore/browse: same YouTube search, but cached. The guest page's genre tabs
-// and singer chips all hit the same canned queries, so one scrape serves every
-// guest for the TTL instead of hammering YouTube per tap.
+// Explore uses one cached country chart shared by all guests and search modes.
 const browseCache = new Map(); // query -> { at, results }
 const BROWSE_TTL_MS = 30 * 60 * 1000;
 
@@ -175,15 +162,14 @@ app.get("/api/browse", async (req, res) => {
   if (!q) return res.json({ results: [] });
   const mode = req.query.mode || "songs";
   if (!["songs", "karaoke", "videos"].includes(mode)) return res.status(400).json({ error: "โหมดค้นหาไม่ถูกต้อง" });
-  const cacheKey = `${mode}:${q}`;
+  const isChart = ["__hits", "__hk_hits"].includes(q);
+  const cacheKey = isChart ? "chart" : `${mode}:${q}`;
   const hit = browseCache.get(cacheKey);
   if (hit && Date.now() - hit.at < BROWSE_TTL_MS) return res.json({ results: hit.results });
   try {
-    // Chart sentinels use popular-song search in karaoke mode.
-    const isChart = ["__hits", "__hk_hits"].includes(q);
-    const fetched = mode !== "karaoke" && isChart
+    const fetched = isChart
       ? await fetchChartHits({ ...youtubeOptions, limit: 40 })
-      : await searchYouTube(isChart ? "เพลงไทยยอดนิยม" : q, { ...youtubeOptions, limit: 40, mode });
+      : await searchYouTube(q, { ...youtubeOptions, limit: 40, mode });
     const results = fetched
       .filter((r) => durationSeconds(r.duration) <= MAX_SINGLE_SECONDS)
       .slice(0, 20);

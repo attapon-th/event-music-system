@@ -1,7 +1,7 @@
 // Uses the shared search UI and room-scoped authoritative snapshots.
 let adminState = { nowPlaying: null, queue: [], paused: false, volume: 60 };
 let adminAuthenticated = false;
-let adminRoom = { participants: [], filterOn: false, moderationMode: "default", cooldownSeconds: 15 };
+let adminRoom = { participants: [], filterOn: false, moderationMode: "default", cooldownSeconds: 5 };
 let draggingId = null;
 const adminFeedback = document.getElementById("admin-feedback");
 const adminControls = document.querySelectorAll(".admin-controls button, .admin-controls input");

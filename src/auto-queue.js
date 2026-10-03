@@ -1,4 +1,4 @@
-import { fetchRadioTracks, checkPlayable, durationSeconds } from "./youtube.js";
+import { fetchVideoRecommendations, checkPlayable, durationSeconds } from "./youtube.js";
 
 // Called after a room state changes. One prepared song stays outside the queue;
 // the request identity makes late network replies harmless.
@@ -23,7 +23,7 @@ export function updateAutoQueue(room, isActive, youtubeOptions) {
   state.setAutoQueueStatus("loading");
   return (async () => {
     try {
-      const songs = await fetchRadioTracks(seed.videoId, youtubeOptions);
+      const songs = await fetchVideoRecommendations(seed.videoId, youtubeOptions);
       if (!current()) return;
       // Keep unavailable recommendations bounded instead of retrying forever.
       const candidates = songs.filter(song => durationSeconds(song.duration) <= 600 && eligible(song));

@@ -14,7 +14,7 @@ export class JukeboxState {
     this.paused = false;
     this.volume = 60;
     this.history = []; // played items (most recent last), capped
-    this.autoQueue = false;
+    this.autoQueue = true;
     this.autoQueueStatus = "idle";
     this.autoQueueNext = null; // prepared song, outside the upcoming request queue
     this.autoQueueRequest = null;

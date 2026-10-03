@@ -29,7 +29,7 @@ const context = createContext({
 const source = ["i18n.js", "admin.js"].map(file => readFileSync(new URL(`../public/${file}`, import.meta.url), "utf8")).join("\n");
 runInContext(source, context);
 await Promise.resolve();
-const state = { nowPlaying: null, queue: [], paused: false, volume: 100 };
+const state = { nowPlaying: null, queue: [], paused: false, volume: 100, autoQueue: true };
 const participants = [
   { id: "player", name: "Player", role: "player", online: true },
   { id: "owner", name: "ผู้ดูแล", role: "admin", online: true },
@@ -38,7 +38,7 @@ const participants = [
 ];
 handlers.onAuth({ role: "admin" });
 handlers.onState({ state, code: "123", memberId: "owner", primaryAdminId: "owner", role: "admin", participants,
-  filterOn: false, moderationMode: "default", cooldownSeconds: 15 });
+  filterOn: false, moderationMode: "default", cooldownSeconds: 5 });
 assert.equal(node("admin-title").textContent, "ผู้ดูแลเพลง · ห้อง 123");
 const list = node("participants-list");
 assert.equal(list.children.length, 4, "roster includes online and offline members");
@@ -50,10 +50,10 @@ list.children[2].children[1].onclick();
 assert.deepEqual(sent.at(-1), { type: "setParticipantRole", id: "guest", enabled: true });
 list.children[3].children[1].onclick();
 assert.deepEqual(sent.at(-1), { type: "setParticipantRole", id: "helper", enabled: false });
-assert.equal(node("admin-cooldown-label").textContent, "เวลารอ: 15 วินาที");
-assert.equal(node("admin-auto-queue").getAttribute("aria-pressed"), "false");
+assert.equal(node("admin-cooldown-label").textContent, "เวลารอ: 5 วินาที");
+assert.equal(node("admin-auto-queue").getAttribute("aria-pressed"), "true");
 node("admin-auto-queue").onclick();
-assert.deepEqual(sent.at(-1), { type: "setAutoQueue", enabled: true });
+assert.deepEqual(sent.at(-1), { type: "setAutoQueue", enabled: false });
 state.autoQueue = true;
 state.autoQueueStatus = "loading";
 handlers.onState({ state, role: "admin", participants });

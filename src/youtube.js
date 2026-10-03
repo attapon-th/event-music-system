@@ -34,36 +34,51 @@ export function durationSeconds(duration) {
   return duration.split(":").reduce((seconds, part) => seconds * 60 + Number(part), 0);
 }
 
-// YouTube Music's song radio (the same watch playlist used by its web player).
-export async function fetchRadioTracks(videoId, { limit = 20, timeoutMs = 8000, region = "TH", locale = "th-TH" } = {}) {
+// Recommendations from YouTube's regular watch page, in its original order.
+export async function fetchVideoRecommendations(videoId, { limit = 20, timeoutMs = 8000, region = "TH", locale = "th-TH" } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch("https://music.youtube.com/youtubei/v1/next?prettyPrint=false", {
+    const res = await fetch("https://www.youtube.com/youtubei/v1/next?prettyPrint=false", {
       method: "POST",
-      headers: { ...COMMON_HEADERS, "Content-Type": "application/json", Origin: "https://music.youtube.com", Referer: "https://music.youtube.com/" },
+      headers: { ...COMMON_HEADERS, "Content-Type": "application/json", Origin: "https://www.youtube.com", Referer: "https://www.youtube.com/" },
       body: JSON.stringify({
-        context: { client: { clientName: "WEB_REMIX", clientVersion: "1.20250101.01.00", hl: locale.split("-")[0], gl: region } },
-        videoId, playlistId: "RDAMVM" + videoId, params: "wAEB",
-        enablePersistentPlaylistPanel: true, isAudioOnly: true, tunerSettingValue: "AUTOMIX_SETTING_NORMAL",
+        context: { client: { clientName: "WEB", clientVersion: "2.20250101.00.00", hl: locale.split("-")[0], gl: region } },
+        videoId,
       }),
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`YouTube Music radio responded ${res.status}`);
+    if (!res.ok) throw new Error(`YouTube recommendations responded ${res.status}`);
     const data = await res.json();
-    const tabs = data?.contents?.singleColumnMusicWatchNextResultsRenderer?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs || [];
-    const contents = tabs[0]?.tabRenderer?.content?.musicQueueRenderer?.content?.playlistPanelRenderer?.contents;
-    if (!Array.isArray(contents)) throw new Error("YouTube Music radio unavailable");
-    const text = (value) => value?.runs?.map((run) => run.text).join("") || value?.simpleText || "";
+    const contents = data?.contents?.twoColumnWatchNextResults?.secondaryResults?.secondaryResults?.results;
+    if (!Array.isArray(contents)) throw new Error("YouTube recommendations unavailable");
+    const text = (value) => value?.content || value?.runs?.map((run) => run.text).join("") || value?.simpleText || "";
     const results = [];
-    for (const item of contents) {
-      const r = item.playlistPanelVideoRenderer || item.playlistPanelVideoWrapperRenderer?.primaryRenderer?.playlistPanelVideoRenderer;
-      if (!r?.videoId || r.unplayableText || !/^[A-Za-z0-9_-]{11}$/.test(r.videoId)) continue;
-      const title = text(r.title);
-      if (!title) continue;
-      const thumbnail = pickThumbnail(r.thumbnail?.thumbnails);
-      results.push({ videoId: r.videoId, title: title.slice(0, 500), channel: text(r.shortBylineText || r.longBylineText),
-        duration: text(r.lengthText), thumbnail: thumbnail && /^https:\/\/[^\s"<>]+$/.test(thumbnail) ? thumbnail : null });
+    for (const item of contents.flatMap(item => item.itemSectionRenderer?.contents || [item])) {
+      const compact = item.compactVideoRenderer;
+      const lockup = item.lockupViewModel;
+      let id, title, channel, duration, thumbnails;
+      if (compact && !compact.unplayableText) {
+        id = compact.videoId;
+        title = text(compact.title);
+        channel = text(compact.shortBylineText || compact.longBylineText);
+        duration = text(compact.lengthText) || text(compact.thumbnailOverlays?.find(
+          overlay => overlay.thumbnailOverlayTimeStatusRenderer)?.thumbnailOverlayTimeStatusRenderer?.text);
+        thumbnails = compact.thumbnail?.thumbnails;
+      } else if (lockup?.contentType === "LOCKUP_CONTENT_TYPE_VIDEO") {
+        const metadata = lockup.metadata?.lockupMetadataViewModel;
+        const image = lockup.contentImage?.thumbnailViewModel;
+        id = lockup.contentId;
+        title = text(metadata?.title);
+        channel = text(metadata?.metadata?.contentMetadataViewModel?.metadataRows?.[0]?.metadataParts?.[0]?.text);
+        duration = (image?.overlays || []).flatMap(overlay => overlay.thumbnailBottomOverlayViewModel?.badges || [])
+          .map(badge => badge.thumbnailBadgeViewModel?.text).find(value => /^\d+(?::\d{2}){1,2}$/.test(value || "")) || "";
+        thumbnails = image?.image?.sources;
+      } else continue;
+      if (typeof id !== "string" || !/^[A-Za-z0-9_-]{11}$/.test(id) || typeof title !== "string" || !title.trim()) continue;
+      const thumbnail = thumbnails?.at(-1)?.url;
+      results.push({ videoId: id, title: title.slice(0, 500), channel, duration,
+        thumbnail: typeof thumbnail === "string" && /^https:\/\/[^\s"<>]+$/.test(thumbnail) ? thumbnail : null });
       if (results.length >= limit) break;
     }
     return results;

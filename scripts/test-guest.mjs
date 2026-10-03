@@ -31,7 +31,7 @@ const document = {
   getElementById(id) {
     if (!elements.has(id)) {
       const node = element();
-      node.hidden = ["singers", "participants-tab"].includes(id);
+      node.hidden = id === "participants-tab";
       elements.set(id, node);
     }
     return elements.get(id);
@@ -51,7 +51,7 @@ runInContext(source, context);
 await Promise.resolve();
 const run = (code) => runInContext(code, context);
 assert.equal(run("searchMode"), "videos", "Guest and Admin default to videos");
-assert.equal(new URL(initialRequests[0], "http://localhost").searchParams.get("mode"), "videos", "Initial recommendations use video mode");
+assert.equal(initialRequests[0], "/api/browse?q=__hits", "Initial recommendations use only the country chart");
 const publicDir = new URL("../public/", import.meta.url);
 for (const file of readdirSync(publicDir).filter((name) => /\.(html|js|css)$/.test(name))) {
   const text = readFileSync(new URL(file, publicDir), "utf8");
@@ -78,8 +78,8 @@ assert.equal(run("NICKNAMES.length"), 100);
 assert.equal(run("new Set(NICKNAMES).size"), 100);
 const nickname = storage.get("guestNickname");
 assert.equal(run("NICKNAMES.includes(nickname)"), true);
-assert.equal(document.getElementById("request-title").textContent, `Music by ${nickname}`);
-assert.equal(document.title, `Music by ${nickname}`);
+assert.equal(document.getElementById("request-title").textContent, `คิวเพลิน by "${nickname}"`);
+assert.equal(document.title, `คิวเพลิน by "${nickname}"`);
 const reloadElements = new Map();
 const reloadDocument = { ...document, getElementById(id) {
   if (!reloadElements.has(id)) reloadElements.set(id, element());
@@ -138,8 +138,8 @@ for (const page of ["guest", "admin"]) {
   assert.match(html, /id="mode-videos"[^>]+data-i18n="videos"/, `${page}: video button uses the shared label`);
   assert.match(html, /<section id="suggestions-section">/);
   assert.match(html, /id="shuffle" class="shuffle"/);
-  assert.match(html, /id="singers" class="singers" hidden/);
-  assert.match(html, /id="genre-tabs" class="genre-tabs"/);
+  assert.doesNotMatch(html, /id="browse-all"|data-i18n="All"/);
+  assert.doesNotMatch(html, /id="singers"|id="genre-tabs"/);
 }
 
 let calls = 0;
@@ -155,28 +155,33 @@ context.fetch = async (url) => {
 await run("doSearch('test')");
 assert.equal(results.children.length, 5);
 assert.deepEqual(resultTitles(), searchResults.slice(0, 5).map((item) => item.title));
-await run("loadMoreSongs()");
+more.onclick();
 assert.equal(results.children.length, 10);
 assert.deepEqual(resultTitles(), searchResults.slice(0, 10).map((item) => item.title));
-await run("loadMoreSongs()");
+more.onclick();
 assert.equal(results.children.length, 12);
 assert.deepEqual(resultTitles(), searchResults.map((item) => item.title), "paging preserves YouTube order");
 assert.equal(more.classList.contains("hidden"), true);
 assert.equal(calls, 1, "search pages reuse fetched results");
 
-const batches = [songs(0, 12), songs(0, 12), songs(10, 5)];
-context.fetch = async () => { calls++; return response(batches.shift()); };
-await run("startBrowse(['first', 'duplicates', 'overlap'])");
+calls = 0;
+context.fetch = async url => {
+  calls++;
+  assert.equal(url, "/api/browse?q=__hits");
+  return response([...songs(0, 12), ...songs(0, 3), { title: "No video ID" }]);
+};
+await run("startBrowse()");
 assert.equal(results.children.length, 5);
-await run("loadMoreSongs()");
+more.onclick();
 assert.equal(results.children.length, 10);
-await run("loadMoreSongs()");
+more.onclick();
 assert.equal(results.children.length, 12);
-assert.equal(more.classList.contains("hidden"), false, "more query variants remain");
-await run("loadMoreSongs()");
-assert.equal(results.children.length, 15);
-assert.equal(run("browse.seen.size"), 15, "skip duplicate variants and overlapping songs");
 assert.equal(more.classList.contains("hidden"), true);
+assert.equal(new Set(resultTitles()).size, 12, "chart results exclude duplicate videos and missing IDs");
+assert.equal(calls, 1, "chart pages use one fetched result set");
+await document.getElementById("shuffle").onclick();
+assert.equal(calls, 2, "shuffle reloads only the country chart");
+assert.equal(results.children.length, 5);
 
 context.fetch = async (url) => {
   assert.equal(new URL(url, "http://localhost").searchParams.get("mode"), "karaoke");
@@ -192,7 +197,11 @@ run("renderQueue({ nowPlaying: null, queue: [{ id: 'live', title: 'Live queue', 
 assert.equal(document.getElementById("queue-count").textContent, 1);
 run("selectPageTab(0)");
 assert.equal(document.getElementById("queue-count").textContent, 1, "live queue survives tab switching");
-await run("startBrowse(['karaoke browse'])");
+context.fetch = async url => {
+  assert.equal(url, "/api/browse?q=__hits", "karaoke mode still browses the country chart");
+  return response(songs(60, 6));
+};
+await run("startBrowse()");
 let videoCalls = 0;
 context.fetch = async (url) => {
   videoCalls++;
@@ -212,7 +221,7 @@ await document.getElementById("mode-songs").onclick();
 
 let finishOld;
 context.fetch = () => new Promise((resolve) => { finishOld = resolve; });
-const oldBrowse = run("startBrowse(['slow'])");
+const oldBrowse = run("startBrowse()");
 context.fetch = async () => response(songs(100, 8));
 await run("doSearch('new')");
 finishOld(response(songs(200, 20)));
@@ -230,7 +239,7 @@ assert.equal(results.children.length, 2, "stale search cannot overwrite latest r
 let exploreCalls = 0;
 context.fetch = async (url) => {
   exploreCalls++;
-  assert.equal(new URL(url, "http://localhost").pathname, "/api/browse");
+  assert.equal(url, "/api/browse?q=__hits", "songs mode still browses the country chart");
   return response(songs(500, 8));
 };
 await run("backToExplore()");
@@ -238,23 +247,14 @@ assert.equal(results.children.length, 5, "Admin restores recommendations after s
 assert.equal(document.getElementById("suggestions-section").classList.contains("hidden"), false);
 assert.equal(document.getElementById("back-to-explore").classList.contains("hidden"), true);
 assert.equal(exploreCalls, 1);
-assert.equal(document.getElementById("genre-tabs").children.length, run("Object.keys(GENRE_QUERIES).length"));
-assert.equal(document.getElementById("singers").hidden, true);
-assert.equal(document.getElementById("singers").children.length, 0, "Hidden artist lists are retained without rendering chips");
-assert.equal(run("SINGERS.length > 0"), true);
-assert.deepEqual(JSON.parse(run("JSON.stringify(Object.keys(GENRE_QUERIES))")),
-  ["All", "Thai", "ThaiCountry", "ThaiLife", "ThaiOldies", "ThaiRock", "ThaiIndie", "ThaiHipHop", "K-pop", "Cantopop", "Mandopop", "Western", "Party", "Classics"]);
-for (const genre of ["ThaiCountry", "ThaiLife", "ThaiOldies", "ThaiRock", "ThaiIndie", "ThaiHipHop"]) {
-  context.fetch = async url => {
-    const query = new URL(url, "http://localhost").searchParams.get("q");
-    assert.equal(run(`GENRE_QUERIES.${genre}.includes(${JSON.stringify(query)})`), true);
-    return response(songs(600, 5));
-  };
-  await run(`selectGenre(${JSON.stringify(genre)})`);
-  assert.equal(results.children.length, 5);
-  assert.equal(run(`GENRE_ICON.${genre}.includes('<svg')`), true);
-  assert.equal(run(`GENRE_QUERIES.${genre}.length`), 3);
-}
+context.fetch = async () => response([]);
+await run("startBrowse()");
+assert.equal(document.getElementById("status").textContent, "ไม่พบเพลงในชาร์ต ลองค้นหาเพลง");
+assert.equal(more.classList.contains("hidden"), true);
+context.fetch = async () => ({ ok: false, json: async () => ({ error: "โหลดชาร์ตไม่ได้" }) });
+await run("startBrowse()");
+assert.match(document.getElementById("status").textContent, /โหลดชาร์ตไม่ได้/);
+assert.equal(more.disabled, false, "chart failure leaves controls usable for retry");
 
 run("toast = () => ({ set() {}, dismiss() {} })");
 context.fetch = async (url, options) => {
@@ -263,4 +263,4 @@ context.fetch = async (url, options) => {
   return { json: async () => ({ ok: true, position: 1 }) };
 };
 await run("requestSong({ videoId: 'song1', title: 'Test' }, document.createElement('button'))");
-console.log("PASS: Thai/English UI without Chinese or missing translations; nickname persistence/request attribution; five-song batches in search order; deduplication; stale responses; search/queue tabs; songs/karaoke/video buttons.");
+console.log("PASS: Thai/English UI without Chinese or missing translations; nickname persistence/request attribution; five-song batches in search order; country chart in every mode without category buttons; chart paging/deduplication/retry; stale responses; search/queue tabs; songs/karaoke/video buttons.");

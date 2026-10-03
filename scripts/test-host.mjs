@@ -92,7 +92,7 @@ for (const earlyReady of [false, true]) {
         unavailable(message) { context.Room.connected = false; return handlers.onUnavailable?.(message); },
         onmessage({ data }) {
         const msg = JSON.parse(data);
-        if (msg.type === "state") handlers.onState({ filterOn: false, moderationMode: "default", cooldownSeconds: 15, eventContext: "", ...msg });
+        if (msg.type === "state") handlers.onState({ filterOn: false, moderationMode: "default", cooldownSeconds: 5, eventContext: "", ...msg });
         if (msg.type === "sessionEnded") handlers.onEnd();
       } };
     },
@@ -132,7 +132,7 @@ for (const earlyReady of [false, true]) {
   assert.equal(document.activeElement.id, "playpause", "Player opens without a start screen");
   runInContext(`ws.onmessage({ data: JSON.stringify({ type: "state", state: {
     nowPlaying: { videoId: "song0000001", title: "Test", channel: "Artist" },
-    queue: [], paused: false, volume: 37
+    queue: [], paused: false, volume: 37, autoQueue: true
   } }) });`, context);
   assert.equal(document.activeElement.id, "playpause");
   assert.equal(calls.filter(([action]) => action === "init").length, 1, `API ready ${earlyReady ? "before" : "after"} Host script: initialize one player`);
@@ -152,10 +152,10 @@ for (const earlyReady of [false, true]) {
   assert.ok(calls.some(([action, volume]) => action === "volume" && volume === 37));
   assert.equal(document.getElementById("player").getAttribute("tabindex"), "-1");
   const autoQueueToggle = document.getElementById("auto-queue-toggle");
-  assert.equal(autoQueueToggle.getAttribute("aria-pressed"), "false");
+  assert.equal(autoQueueToggle.getAttribute("aria-pressed"), "true");
   autoQueueToggle.click();
   assert.equal(messages.at(-1).type, "setAutoQueue");
-  assert.equal(messages.at(-1).enabled, true);
+  assert.equal(messages.at(-1).enabled, false);
   runInContext('latestState.autoQueue = true; latestState.autoQueueStatus = "loading"; latestState.nowPlaying.autoQueued = true; render();', context);
   assert.equal(autoQueueToggle.getAttribute("aria-pressed"), "true");
   assert.equal(autoQueueToggle.classList.contains("on"), true);

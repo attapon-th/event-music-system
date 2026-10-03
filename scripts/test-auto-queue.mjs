@@ -1,23 +1,37 @@
 import assert from "node:assert/strict";
 import { JukeboxState } from "../src/state.js";
 import { updateAutoQueue } from "../src/auto-queue.js";
-import { fetchRadioTracks } from "../src/youtube.js";
+import { fetchVideoRecommendations } from "../src/youtube.js";
 
 const song = (videoId, extra = {}) => ({ videoId, title: videoId, channel: "Artist", duration: "3:20", ...extra });
-function radioResponse(songs) {
-  const contents = songs.map(item => {
+function recommendationResponse(songs) {
+  const results = songs.map(item => {
+    if (item.lockup) return { lockupViewModel: {
+      contentId: item.videoId, contentType: item.kind || "LOCKUP_CONTENT_TYPE_VIDEO",
+      metadata: { lockupMetadataViewModel: {
+        title: { content: item.title }, metadata: { contentMetadataViewModel: {
+          metadataRows: [{ metadataParts: [{ text: { content: item.channel } }] }] },
+        },
+      } },
+      contentImage: { thumbnailViewModel: {
+        image: { sources: [{ url: item.thumbnail || "https://example.com/thumb.jpg" }] },
+        overlays: [{ thumbnailBottomOverlayViewModel: { badges: [
+          { thumbnailBadgeViewModel: { text: "กำลังเล่น" } },
+          { thumbnailBadgeViewModel: { text: item.duration } },
+        ] } }],
+      } },
+    } };
+    if (item.kind) return { [item.kind]: {} };
     const renderer = { videoId: item.videoId, title: { runs: [{ text: item.title }] },
-      shortBylineText: { runs: [{ text: item.channel }] }, lengthText: { simpleText: item.duration },
+      shortBylineText: { runs: [{ text: item.channel }] },
+      ...(item.overlayDuration
+        ? { thumbnailOverlays: [{ thumbnailOverlayTimeStatusRenderer: { text: { simpleText: item.duration } } }] }
+        : { lengthText: { simpleText: item.duration } }),
       thumbnail: { thumbnails: [{ url: item.thumbnail || "https://example.com/thumb.jpg" }] },
       ...(item.unplayable ? { unplayableText: { simpleText: "Unavailable" } } : {}) };
-    return item.wrapper ? { playlistPanelVideoWrapperRenderer: { primaryRenderer: { playlistPanelVideoRenderer: renderer } } }
-      : { playlistPanelVideoRenderer: renderer };
+    return { compactVideoRenderer: renderer };
   });
-  return Response.json({ contents: { singleColumnMusicWatchNextResultsRenderer: { tabbedRenderer: {
-    watchNextTabbedResultsRenderer: { tabs: [{ tabRenderer: { content: { musicQueueRenderer: {
-      content: { playlistPanelRenderer: { contents } },
-    } } } }] },
-  } } } });
+  return Response.json({ contents: { twoColumnWatchNextResults: { secondaryResults: { secondaryResults: { results } } } } });
 }
 const realFetch = globalThis.fetch;
 let recommendations;
@@ -30,11 +44,14 @@ let checkGate = false;
 globalThis.fetch = async (url, options) => {
   if (String(url).includes("/next?")) {
     const body = JSON.parse(options.body);
-    assert.equal(body.context.client.clientName, "WEB_REMIX");
+    assert.equal(new URL(url).origin, "https://www.youtube.com");
+    assert.equal(options.headers.Origin, "https://www.youtube.com");
+    assert.equal(body.context.client.clientName, "WEB");
     assert.equal(body.context.client.gl, "TH");
     assert.equal(body.context.client.hl, "th");
-    assert.equal(body.playlistId, "RDAMVM" + body.videoId);
-    assert.equal(body.params, "wAEB");
+    assert.equal(body.isAudioOnly, undefined, "recommendations must not force audio-only tracks");
+    assert.equal(body.playlistId, undefined, "recommendations use the latest video, not Music Radio");
+    assert.equal(body.params, undefined);
     requests.push(body.videoId);
     const results = recommendations(body.videoId);
     if (responseGate) {
@@ -42,7 +59,7 @@ globalThis.fetch = async (url, options) => {
       await new Promise(resolve => { release = resolve; });
     }
     if (results instanceof Error) throw results;
-    return radioResponse(results);
+    return Array.isArray(results) ? recommendationResponse(results) : Response.json(results);
   }
   const id = new URL(new URL(url).searchParams.get("url")).pathname.slice(1);
   checks.push(id);
@@ -70,14 +87,24 @@ function room() {
   return value;
 }
 try {
-  recommendations = () => [song("auto0000001", { wrapper: true, thumbnail: 'https://example.com/"bad' }), song("invalid", {}), song("auto0000002", { unplayable: true })];
-  const parsed = await fetchRadioTracks("main0000001");
-  assert.deepEqual(parsed.map(item => item.videoId), ["auto0000001"], "radio wrapper parsing, invalid IDs and unplayable tracks");
-  assert.equal(parsed[0].thumbnail, null, "radio artwork follows the request pipeline's safe HTTPS validation");
+  recommendations = () => [song("auto0000001", { lockup: true, thumbnail: 'https://example.com/"bad' }),
+    song("invalid"), song("auto0000002", { unplayable: true }), song("auto0000003", { overlayDuration: true }),
+    song("auto0000004", { lockup: true }), song("auto0000005", { title: "" }),
+    song("auto0000006", { lockup: true, kind: "LOCKUP_CONTENT_TYPE_PLAYLIST" }),
+    song("auto0000007", { kind: "compactChannelRenderer" }), song("auto0000008", { kind: "continuationItemRenderer" })];
+  const parsed = await fetchVideoRecommendations("main0000001");
+  assert.equal(requests[0], "main0000001", "recommendations use the supplied seed");
+  assert.deepEqual(parsed.map(item => item.videoId), ["auto0000001", "auto0000003", "auto0000004"], "both video renderers preserve order and skip invalid, unavailable and non-video entries");
+  assert.equal(parsed[0].thumbnail, null, "recommendation artwork follows the request pipeline's safe HTTPS validation");
+  assert.deepEqual(parsed[2], song("auto0000004", { thumbnail: "https://example.com/thumb.jpg" }));
+  assert.equal(parsed[1].duration, "3:20", "compact video duration can come from a thumbnail overlay");
+  assert.equal((await fetchVideoRecommendations("main0000001", { limit: 1 })).length, 1);
+  recommendations = () => ({});
+  await assert.rejects(fetchVideoRecommendations("main0000001"), /recommendations unavailable/);
   requests = [];
   const a = room();
   const b = room();
-  a.state.setAutoQueue(true);
+  assert.equal(a.state.autoQueue, true, "new rooms enable Auto Queue by default");
   assert.equal(a.state.nowPlaying, null, "a new room waits for its first requested song");
   assert.equal(requests.length, 0);
   a.state.setAutoQueue(false);
@@ -114,8 +141,8 @@ try {
   assert.equal(a.state.queue[0].videoId, "main0000003");
   a.state.advance("auto0000003");
   assert.equal(a.state.nowPlaying.videoId, "main0000003", "requested track has priority over prepared recommendations");
-  assert.equal(b.state.autoQueue, false, "room settings and recommendations are isolated");
   a.state.setAutoQueue(false);
+  assert.equal(b.state.autoQueue, true, "disabling Auto Queue leaves other rooms enabled");
   await a.settle();
   a.state.advance("main0000003");
   assert.equal(a.state.nowPlaying, null, "disabled Auto Queue leaves the room idle");
@@ -123,6 +150,7 @@ try {
   // Hold an old response across off/on and a new request. Only the latest seed wins.
   recommendations = seed => [song(seed === "main0000004" ? "auto0000004" : "auto0000005")];
   const race = room();
+  race.state.setAutoQueue(false);
   race.state.add(song("main0000004"));
   responseGate = true;
   race.state.setAutoQueue(true);
@@ -141,10 +169,11 @@ try {
   assert.equal(race.state.autoQueueNext, null);
 
   const checking = room();
+  checking.state.setAutoQueue(false);
   checking.state.add(song("main0000004"));
   checkGate = true;
   checking.state.setAutoQueue(true);
-  // Let the radio response reach its asynchronous playability check.
+  // Let the recommendation response reach its asynchronous playability check.
   await new Promise(resolve => setImmediate(resolve));
   checking.state.add(song("main0000005"));
   release();
@@ -154,6 +183,7 @@ try {
   assert.equal(checking.state.autoQueueNext, null, "new requests cancel a recommendation during its playability check");
 
   const disabled = room();
+  disabled.state.setAutoQueue(false);
   disabled.state.add(song("main0000004"));
   responseGate = true;
   disabled.state.setAutoQueue(true);
@@ -166,6 +196,7 @@ try {
 
   // Ending while fetch is pending, pausing while idle, and room closure.
   const delayed = room();
+  delayed.state.setAutoQueue(false);
   delayed.state.add(song("main0000004"));
   responseGate = true;
   delayed.state.setAutoQueue(true);
@@ -178,6 +209,7 @@ try {
   assert.equal(delayed.state.nowPlaying.videoId, "auto0000004", "resume uses the prepared song");
   await delayed.settle();
   const closed = room();
+  closed.state.setAutoQueue(false);
   closed.state.add(song("main0000004"));
   responseGate = true;
   closed.state.setAutoQueue(true);
@@ -206,7 +238,7 @@ try {
   failure.state.setAutoQueue(true);
   await failure.settle();
   assert.equal(requests.length, requestCount + 1, "off/on starts a new attempt");
-  assert.equal(failure.state.autoQueueStatus, "unavailable", "empty radio shows an unavailable status");
+  assert.equal(failure.state.autoQueueStatus, "unavailable", "empty recommendations shows an unavailable status");
   recommendations = () => Array.from({ length: 5 }, (_, i) => song(`bad0000000${i}`));
   blocked = new Set(recommendations().map(item => item.videoId));
   checks = [];
@@ -235,7 +267,7 @@ try {
   await errors.settle();
   assert.equal(errors.state.autoQueueFailures, 0);
   assert.equal(errors.state.autoQueueStatus, "ready");
-  console.log("PASS: radio parsing, main queue priority, Auto Queue continuation, deduplication, cancellation/off-on races, delayed/paused/closed rooms, bounded failures and retry (YouTube simulated).");
+  console.log("PASS: video recommendation parsing, main queue priority, Auto Queue continuation, deduplication, cancellation/off-on races, delayed/paused/closed rooms, bounded failures and retry (YouTube simulated).");
 } finally {
   globalThis.fetch = realFetch;
 }

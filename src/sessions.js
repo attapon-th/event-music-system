@@ -39,8 +39,10 @@ export class Sessions {
   }
 
   issue(room, role) {
+    if (role === "guest" && !room.primaryAdminId) role = "admin";
     const token = randomUUID();
     const member = { room, role, token, id: randomUUID(), name: role === "player" ? "Player" : "ผู้เข้าร่วม" };
+    if (role === "admin") room.primaryAdminId = member.id;
     room.tokens.add(token);
     this.tokens.set(token, member);
     room.members.set(member.id, member);

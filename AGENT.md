@@ -31,7 +31,7 @@ There is no frontend bundler or compilation step.
 | `server.js` | Environment loading, authentication, HTTP request pipeline, room-scoped WebSocket dispatch/broadcast |
 | `src/sessions.js` | Room lifecycle, membership and roles and in-memory credentials |
 | `src/state.js` | `JukeboxState`: authoritative queue, current track, history, pause state, volume |
-| `src/youtube.js` | YouTube Music search/country charts, oEmbed checks, watch-page metadata |
+| `src/youtube.js` | YouTube search/video recommendations, country charts, oEmbed checks, watch-page metadata |
 | `src/moderation.js` | Retained LLM content filter; paused and outside current development |
 | `public/host.*` | Player at `/`: YouTube IFrame, welcome entry, QR visibility and room exit |
 | `public/guest.*` | Public search, Explore, song requests, queue display at `/guest` and `/explore` |
@@ -54,7 +54,8 @@ There is no frontend bundler or compilation step.
   work. The request limit is 50 upcoming tracks; history is capped at 100 items.
 - Playback state and volume belong to the server snapshot. Player applies them
   through the IFrame API; Admin remains a controller rather than an audio source.
-  New rooms start at 60% volume, applied before loading the first video.
+  New rooms start at 60% volume, applied before loading the first video, with
+  Auto Queue enabled and a five-second request cooldown.
 - `HOST_PASSWORD` authorizes room creation and contains only ASCII digits, at least
   four digits; invalid configuration exits before listening. Existing nonnumeric
   passwords must be replaced before restarting. Root entry displays digits openly
@@ -63,6 +64,9 @@ There is no frontend bundler or compilation step.
   to preserve leading zeros. Failed entry
   locks browser submission for five seconds; HTTP 429 carries the remaining retry time.
 - Every WebSocket authenticates a room credential before receiving a snapshot.
+  The first participant joining by room number or QR becomes the primary Admin
+  atomically during admission and opens `/a`. Later participants are Guests;
+  re-entry preserves existing roles, including an offline Admin's authority.
   Check membership on every command; only Player reports completion/errors, and
   only the primary Admin grants/revokes Controller rights. Controllers manage playback
   and settings. Only the primary Admin receives the participant roster and tab.
@@ -82,7 +86,8 @@ There is no frontend bundler or compilation step.
   Video search uses regular YouTube with unchanged queries and preserves result
   order, including live and long videos. Karaoke still adds its keyword and excludes live results.
   Chart discovery uses the configured country, with `TH`/`th-TH` defaults.
-  Both `__hits` and the legacy `__hk_hits` browse sentinel use that country.
+  Both `__hits` and the legacy `__hk_hits` browse sentinel use that country in
+  every search mode and share one chart cache.
   Keep international searches available. Browse caches results for 30 minutes
   and excludes unknown/live durations and tracks longer than 10 minutes.
 - AI is paused and outside current development. Keep the retained moderation
@@ -92,12 +97,15 @@ There is no frontend bundler or compilation step.
 - Keep user-facing UI Thai through the dictionary; preserve YouTube titles and
   artist names. Icon buttons retain Thai `title`/`aria-label`, keyboard access,
   and touch targets. Reacquire pointer capture after moving a dragged row in the DOM.
-- Keep the `Music by {nickname}` heading with Thai nicknames, icon search/queue tabs,
+- Keep the `คิวเพลิน by "{nickname}"` heading with Thai nicknames, icon search/queue tabs,
   and 16px search inputs. Wrap long result metadata inside its shrinking flex column.
   Player event context and Admin clear are hidden; the filter button is removed.
   Admin cooldown shows its value in the button. `/g` redirects to `/guest` with queries intact.
-- Keep Thai genres in the documented order and artist chips hidden while retaining
-  their data. Room nicknames survive refresh/reconnect within the same session.
+- Explore shows a shuffled country chart without category buttons, paged from one response in
+  five-song batches. Search mode buttons control specific searches.
+  Auto Queue uses regular YouTube WEB watch recommendations based on the latest
+  video, preserving recommendation order and the 10-minute duration limit.
+  Room nicknames survive refresh/reconnect within the same session.
 - Player entry shows the welcome screen first. Start reveals the shared credential
   field with an accessible name and icon-only next button; successful creation opens
   Player, and closing the room restores welcome. Handle autoplay blocking with

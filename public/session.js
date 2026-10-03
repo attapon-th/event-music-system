@@ -73,8 +73,6 @@ const Room = (() => {
     panel.hidden = true;
     document.body.dataset.roomActive = "true";
     if (content) content.hidden = false;
-    const claim = node("claim-admin");
-    if (claim) claim.hidden = current.role !== "guest" || !!state.primaryAdminId;
     return true;
   }
   function end(message, forget = true) {
@@ -97,8 +95,6 @@ const Room = (() => {
       node("start-prompt").hidden = false;
       node("start-btn").focus();
     }
-    const claim = node("claim-admin");
-    if (claim) claim.hidden = true;
     node("room-error").textContent = message;
     if (screen === "player") history.replaceState(null, "", "/");
   }
@@ -221,19 +217,6 @@ const Room = (() => {
     remember(await post("/api/sessions/join", { code }, saved(code, null, false)));
     location.replace(url(privileged() ? "admin" : "guest"));
   });
-  const claim = node("claim-admin");
-  if (claim) claim.onclick = async () => {
-    claim.disabled = true;
-    node("claim-error").hidden = true;
-    try {
-      remember(await post("/api/sessions/admin/claim", {}));
-      location.replace(url("admin"));
-    } catch (error) {
-      node("claim-error").textContent = error.message;
-      node("claim-error").hidden = false;
-    }
-    finally { claim.disabled = false; }
-  };
   async function init() {
     const code = params.get("room");
     if (!code) return false;
@@ -248,8 +231,7 @@ const Room = (() => {
       } else {
         remember(await post("/api/sessions/join", { code, ...(id ? { sessionId: id } : {}) }, token, id));
       }
-      // Owner identity arrives with the first WS snapshot; hide claim until then.
-      if (!applyState({ role: current.role, primaryAdminId: true })) return false;
+      if (!applyState({ role: current.role })) return false;
       history.replaceState(null, "", url(screen));
       return true;
     } catch (error) {

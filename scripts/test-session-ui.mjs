@@ -166,10 +166,32 @@ resolvePending({ data: { ...member, role: "player" } });
 await pendingSubmit;
 
 const storage = new Map([["guestNickname", "ผู้ฟังเอ"]]);
-let claimFails = true;
-const guest = page("guest", "?room=123&session=room-id", storage, (path) => path.endsWith("claim") && claimFails
-  ? { status: 403, data: { error: "ห้องนี้มีผู้ดูแลหลักแล้ว" } }
-  : { data: { ...member, role: path.endsWith("claim") ? "admin" : "guest" } });
+const firstAdmin = page("guest", "?room=123&session=room-id", storage, path => {
+  assert.equal(path, "/api/sessions/join");
+  return { data: { ...member, role: "admin" } };
+});
+assert.equal(await firstAdmin.run("Room.ready"), false, "first QR participant redirects before opening Guest content");
+assert.equal(firstAdmin.location.href, "/a?room=123&session=room-id");
+assert.equal(firstAdmin.requests.length, 1, "Admin admission requires only the join request");
+assert.equal(storage.get("music-session:room-id:member"), member.token, "automatic Admin credentials survive the redirect");
+const admin = page("admin", "?room=123&session=room-id", storage, (_path, _body, headers) => {
+  assert.equal(headers.Authorization, `Bearer ${member.token}`);
+  return { data: { ...member, role: "admin" } };
+});
+assert.equal(await admin.run("Room.ready"), true, "automatic Admin opens /a and survives refresh");
+assert.equal(admin.nodes.get("room-content").hidden, false);
+for (const screen of ["guest", "admin"]) {
+  const joined = page(screen, "", new Map(), path => {
+    assert.equal(path, "/api/sessions/join");
+    return { data: { ...member, role: "admin" } };
+  });
+  assert.equal(await joined.run("Room.ready"), false);
+  joined.nodes.get("room-code").value = "123";
+  await joined.nodes.get("room-join").onsubmit({ preventDefault() {} });
+  assert.equal(joined.location.href, "/a?room=123&session=room-id", "first manual participant goes straight to Admin");
+}
+assert.doesNotMatch(readFileSync(new URL("../public/guest.html", import.meta.url), "utf8"), /claim-admin|claim-error|claimAdmin/);
+const guest = page("guest", "?room=123&session=room-id", storage, () => ({ data: member }));
 assert.equal(await guest.run("Room.ready"), true);
 assert.equal(guest.requests[0].body.sessionId, "room-id");
 assert.equal(storage.get("music-session:room-id:member"), member.token);
@@ -179,14 +201,8 @@ const first = guest.sockets[0];
 first.onopen();
 assert.equal(first.sent[0].name, "ผู้ฟังเอ");
 first.onmessage({ data: JSON.stringify({ type: "auth", ok: true, role: "guest" }) });
-first.onmessage({ data: JSON.stringify({ type: "state", role: "guest", primaryAdminId: null }) });
-assert.equal(guest.nodes.get("claim-admin").hidden, false);
-await guest.nodes.get("claim-admin").onclick();
-assert.equal(guest.nodes.get("claim-error").hidden, false, "failed claims show feedback inside the active Guest page");
-assert.equal(guest.nodes.get("panel").hidden, true);
-claimFails = false;
-await guest.nodes.get("claim-admin").onclick();
-assert.match(guest.location.href, /^\/a\?room=123&session=room-id$/);
+first.onmessage({ data: JSON.stringify({ type: "state", role: "guest", primaryAdminId: "owner" }) });
+assert.equal(guest.location.href, undefined, "later participants stay on Guest");
 
 const promoted = page("guest", "?room=123&session=room-id", storage, () => ({ data: member }));
 await promoted.run("Room.ready");
@@ -267,4 +283,4 @@ moved.run("Room.connect({onUnavailable() { throw new Error('Player takeover must
 moved.sockets[0].onmessage({ data: JSON.stringify({ type: "sessionEnded", code: "PLAYER_MOVED" }) });
 assert.equal(moved.run("ended"), true);
 assert.equal(movedStorage.get(playerKey), "player-token", "Moving Player tabs retains refresh credentials");
-console.log("PASS: Player welcome/password/retry/startup, Guest join/claim, /a promotion/revocation redirects, reconnect, room close (DOM simulated).");
+console.log("PASS: Player welcome/password/retry/startup, automatic Admin via QR/manual join/refresh, later Guest admission, /a promotion/revocation redirects, reconnect, room close (DOM simulated).");

@@ -28,7 +28,7 @@ routing audio to the venue AV system.
   - 🛡 **Filter pill** — toggles the LLM content filter ON/OFF live; has an
     "on" (highlighted) state and a small warning hint ("no LLM key — accepts all")
     when it's ON but unconfigured.
-  - ⏱ **Cooldown pill** — shows the per-guest request cooldown ("Cooldown: 15s"
+  - ⏱ **Cooldown pill** — shows the per-guest request cooldown ("Cooldown: 5s" by default
     or "Cooldown: OFF"); clicking cycles presets 0 / 5 / 10 / 15 / 30 / 60 s.
   - 🔊 volume slider.
 
@@ -56,14 +56,11 @@ phone, so returning guests see it pre-filled.
 
 **Search bar** — text input + Search button, hits YouTube directly.
 
-**Explore section (the "KTV" browser)** — the default view and the heart of the page:
-- **Singer chips row** — horizontally scrollable chips, each with a circular
-  avatar (first character of the name, genre-colored) + name. Tapping loads that
-  singer's songs. The row is filtered by the active genre tab.
-- **Genre tabs** — 🔥 All · 💜 K-pop · 🎤 Cantopop · 🎵 Mandopop · 🎧 Western ·
-  🪩 Party · 📼 Classics. One is always active (highlighted).
-- **🔀 Shuffle button** — reshuffles the current selection's songs.
-- Songs shown are real, current YouTube results (fetched live), not a hardcoded list.
+**Explore section** — the default view:
+- Recommendations show the configured country's chart in every search mode, without category buttons.
+- **🔀 Shuffle button** — reshuffles the chart's songs.
+- The chart is fetched from YouTube and cached for 30 minutes. Show five songs
+  at a time; More songs uses the remaining results without another query.
 
 **Results list** (shared by explore and search) — rows of: thumbnail, title,
 channel · duration, and a round **+ add button**. Button states: `+` → `…`
@@ -71,7 +68,7 @@ channel · duration, and a round **+ add button**. Button states: `+` → `…`
 batch. After a search, a **"← Back to Explore"** button restores the explore view.
 
 **Status line** — inline messages: "Loading songs…", "Searching…",
-"No songs found — try another tab.", error strings with 😕.
+"No chart songs found — try searching.", error strings with 😕.
 
 **Toast** (bottom, floating) — the request feedback channel:
 - 🔎 "Checking song…" (persistent while the server verifies)
@@ -90,7 +87,7 @@ the first!"
 
 ## Flows to keep in mind
 
-1. **Happy path**: scan QR → land on explore → tap a genre/singer → tap + →
+1. **Happy path**: scan QR → land on the country chart → tap + →
    toast confirms with queue position → song appears in Up Next (with YOU badge).
 2. **Search path**: type → results → add → "← Back to Explore".
 3. **Rejections**: duplicate song, queue full (50), content filter, unplayable
