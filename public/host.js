@@ -154,11 +154,16 @@ window.addEventListener("pageshow", (e) => {
 
 // ---- Rendering --------------------------------------------------------
 function render() {
+  const autoQueueToggle = document.getElementById("auto-queue-toggle");
+  autoQueueToggle.textContent = t("autoQueue", { state: t(latestState.autoQueue ? "On" : "Off") });
+  autoQueueToggle.setAttribute("aria-pressed", String(!!latestState.autoQueue));
+  autoQueueToggle.classList.toggle("on", !!latestState.autoQueue);
+  document.getElementById("auto-queue-status").textContent = autoQueueMessage(latestState);
   const np = latestState.nowPlaying;
   document.getElementById("now-label").classList.toggle("hidden", !np);
   document.getElementById("now-title").textContent = np ? np.title : "—";
   document.getElementById("now-channel").textContent = np
-    ? np.channel + (np.addedBy ? ` · ${t("requester", { name: np.addedBy })}` : "")
+    ? [np.channel, np.autoQueued && t("autoQueued"), np.addedBy && t("requester", { name: np.addedBy })].filter(Boolean).join(" · ")
     : "";
 
   const queue = latestState.queue || [];
@@ -328,6 +333,7 @@ function wireControls() {
     send({ type: latestState.paused ? "play" : "pause" });
   };
   document.getElementById("skip").onclick = () => send({ type: "skip" });
+  document.getElementById("auto-queue-toggle").onclick = () => send({ type: "setAutoQueue", enabled: !latestState.autoQueue });
   document.getElementById("qr-toggle").onclick = () => {
     const card = document.getElementById("qr-card");
     card.hidden = !card.hidden;

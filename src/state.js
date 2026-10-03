@@ -14,6 +14,11 @@ export class JukeboxState {
     this.paused = false;
     this.volume = 60;
     this.history = []; // played items (most recent last), capped
+    this.autoQueue = false;
+    this.autoQueueStatus = "idle";
+    this.autoQueueNext = null; // prepared song, outside the upcoming request queue
+    this.autoQueueRequest = null;
+    this.autoQueueFailures = 0;
     this.onChange = () => {};
   }
 
@@ -29,6 +34,8 @@ export class JukeboxState {
       historyCount: this.history.length,
       paused: this.paused,
       volume: this.volume,
+      autoQueue: this.autoQueue,
+      autoQueueStatus: this.autoQueueStatus,
     };
   }
 
@@ -44,7 +51,8 @@ export class JukeboxState {
   }
 
   // Add a moderated/approved song. Returns the created item incl. its position.
-  add({ videoId, title, channel, duration, thumbnail, addedBy }) {
+  add({ videoId, title, channel, duration, thumbnail, addedBy, autoQueued = false }) {
+    if (!autoQueued) this._resetAutoQueue();
     const item = {
       id: randomUUID(),
       videoId,
@@ -54,6 +62,7 @@ export class JukeboxState {
       thumbnail: thumbnail || null,
       addedBy: (addedBy || "").slice(0, 40),
       addedAt: Date.now(),
+      ...(autoQueued ? { autoQueued: true } : {}),
     };
     this.queue.push(item);
     this._promoteIfIdle();
@@ -64,16 +73,26 @@ export class JukeboxState {
 
   // Advance to the next song. `finishedVideoId` guards against double-advances
   // from duplicate "ended"/"error" events for the same track.
-  advance(finishedVideoId) {
+  advance(finishedVideoId, failed = false) {
     if (finishedVideoId && this.nowPlaying?.videoId !== finishedVideoId) {
       return; // stale event for a track we already moved past
     }
     if (this.nowPlaying) {
+      this.autoQueueFailures = failed && this.nowPlaying.autoQueued ? this.autoQueueFailures + 1 : 0;
       this.history.push(this.nowPlaying);
       if (this.history.length > 100) this.history.shift();
     }
     this.nowPlaying = this.queue.shift() || null;
     this.paused = false;
+    const prepared = this.autoQueueNext;
+    this.autoQueueNext = null;
+    if (this.autoQueueFailures >= 3) {
+      this.autoQueueRequest = null;
+      this.autoQueueStatus = "unavailable";
+    } else if (!this.nowPlaying && this.autoQueue && prepared) {
+      this.add({ ...prepared, autoQueued: true });
+      return;
+    }
     this._emit();
   }
 
@@ -132,6 +151,26 @@ export class JukeboxState {
   setVolume(volume) {
     if (typeof volume !== "number" || !Number.isFinite(volume) || volume < 0 || volume > 100) return;
     this.volume = Math.round(volume);
+    this._emit();
+  }
+
+  _resetAutoQueue() {
+    this.autoQueueNext = null;
+    this.autoQueueRequest = null;
+    this.autoQueueFailures = 0;
+    this.autoQueueStatus = "idle";
+  }
+
+  setAutoQueue(enabled) {
+    if (typeof enabled !== "boolean" || enabled === this.autoQueue) return;
+    this.autoQueue = enabled;
+    this._resetAutoQueue();
+    this._emit();
+  }
+
+  setAutoQueueStatus(status) {
+    if (this.autoQueueStatus === status) return;
+    this.autoQueueStatus = status;
     this._emit();
   }
 }

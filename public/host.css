@@ -131,7 +131,9 @@ button:focus, input:focus { outline: 3px solid var(--gold) !important; outline-o
 #now-channel { font: 500 19px/1.4 var(--sans); color: var(--warm); }
 
 /* ---- Controls ---- */
-#controls { display: flex; align-items: center; gap: 14px; }
+#controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+#auto-queue-status { font: 500 15px/1.4 var(--sans); color: var(--warm); overflow-wrap: anywhere; }
+#auto-queue-status:empty { display: none; }
 #controls button {
   width: 56px;
   height: 56px;

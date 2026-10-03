@@ -29,6 +29,49 @@ function pickThumbnail(thumbs) {
 // InnerTube search filter for the "Songs" category (same value ytmusicapi uses).
 const SONGS_FILTER = "EgWKAQIIAWoMEA4QChADEAQQCRAF";
 
+export function durationSeconds(duration) {
+  if (!duration || !/^[\d:]+$/.test(duration)) return Infinity;
+  return duration.split(":").reduce((seconds, part) => seconds * 60 + Number(part), 0);
+}
+
+// YouTube Music's song radio (the same watch playlist used by its web player).
+export async function fetchRadioTracks(videoId, { limit = 20, timeoutMs = 8000, region = "TH", locale = "th-TH" } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch("https://music.youtube.com/youtubei/v1/next?prettyPrint=false", {
+      method: "POST",
+      headers: { ...COMMON_HEADERS, "Content-Type": "application/json", Origin: "https://music.youtube.com", Referer: "https://music.youtube.com/" },
+      body: JSON.stringify({
+        context: { client: { clientName: "WEB_REMIX", clientVersion: "1.20250101.01.00", hl: locale.split("-")[0], gl: region } },
+        videoId, playlistId: "RDAMVM" + videoId, params: "wAEB",
+        enablePersistentPlaylistPanel: true, isAudioOnly: true, tunerSettingValue: "AUTOMIX_SETTING_NORMAL",
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`YouTube Music radio responded ${res.status}`);
+    const data = await res.json();
+    const tabs = data?.contents?.singleColumnMusicWatchNextResultsRenderer?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs || [];
+    const contents = tabs[0]?.tabRenderer?.content?.musicQueueRenderer?.content?.playlistPanelRenderer?.contents;
+    if (!Array.isArray(contents)) throw new Error("YouTube Music radio unavailable");
+    const text = (value) => value?.runs?.map((run) => run.text).join("") || value?.simpleText || "";
+    const results = [];
+    for (const item of contents) {
+      const r = item.playlistPanelVideoRenderer || item.playlistPanelVideoWrapperRenderer?.primaryRenderer?.playlistPanelVideoRenderer;
+      if (!r?.videoId || r.unplayableText || !/^[A-Za-z0-9_-]{11}$/.test(r.videoId)) continue;
+      const title = text(r.title);
+      if (!title) continue;
+      const thumbnail = pickThumbnail(r.thumbnail?.thumbnails);
+      results.push({ videoId: r.videoId, title: title.slice(0, 500), channel: text(r.shortBylineText || r.longBylineText),
+        duration: text(r.lengthText), thumbnail: thumbnail && /^https:\/\/[^\s"<>]+$/.test(thumbnail) ? thumbnail : null });
+      if (results.length >= limit) break;
+    }
+    return results;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function searchYouTube(query, { limit = 12, timeoutMs = 8000, region = "TH", locale = "th-TH", mode = "songs" } = {}) {
   const karaoke = mode === "karaoke";
   const videos = mode !== "songs";

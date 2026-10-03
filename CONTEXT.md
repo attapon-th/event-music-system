@@ -67,7 +67,8 @@ checks; acceptance creates a queue item.
 _Avoid_: Guaranteed playback, search result.
 
 **Queue item**:
-One accepted song request with its song metadata and optional requester credit.
+One song selection in the running order, originating from an accepted song request
+or Auto Queue, with its song metadata and optional requester credit.
 It keeps its identity when reordered or promoted to Now Playing.
 _Avoid_: YouTube video identity, search result.
 
@@ -75,6 +76,16 @@ _Avoid_: YouTube video identity, search result.
 The ordered collection of accepted items waiting to play after the current
 song. The current song is outside the Queue.
 _Avoid_: Now Playing, playback history, separate admin playlist.
+
+**Auto Queue**:
+An optional room setting that plays recommendations based on the latest song
+when no requested songs remain. Requested songs take priority after the current
+automatic song finishes; turning the setting off leaves that song playing.
+_Avoid_: YouTube account personalization, adding recommendations to the request Queue.
+
+**Automatic song**:
+A song selected by Auto Queue rather than requested by a participant.
+_Avoid_: Guest request, requester credit, an upcoming requested song.
 
 **Now Playing**:
 The selected current queue item, which may be playing or paused. This label
@@ -95,7 +106,8 @@ _Avoid_: Add to queue, move to next position, resume.
 
 **Skip**:
 An operator action that leaves the current song and selects the next upcoming
-item, or leaves the player idle when none remains.
+item, or allows Auto Queue to select an automatic song when enabled. Otherwise,
+the player stays idle when no upcoming item remains.
 _Avoid_: Pause, remove an upcoming item.
 
 **Clear Queue**:

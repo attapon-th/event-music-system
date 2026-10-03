@@ -14,6 +14,10 @@ const UI_MESSAGES = { th: {
   "participantOffline": "ออฟไลน์",
   "adminRoomTitle": "ผู้ดูแลเพลง · ห้อง {code}",
   "tapToPlay": "กดเล่นเพื่ออนุญาตเสียง",
+  "autoQueue": "เล่นต่ออัตโนมัติ: {state}",
+  "autoQueued": "เพลงอัตโนมัติ",
+  "autoQueueLoading": "กำลังหาเพลงแนะนำ…",
+  "autoQueueUnavailable": "หาเพลงต่อไม่ได้ ลองปิดแล้วเปิดเล่นต่ออัตโนมัติ หรือเพิ่มเพลงใหม่",
 
   "joinRoom": "เข้าห้องเดิม",
   "roomNumber": "เลขห้อง 3 หลัก",
@@ -138,6 +142,11 @@ const UI_MESSAGES = { th: {
 const UI_LANGUAGE = "th";
 function t(key, values = {}) {
   return (UI_MESSAGES[UI_LANGUAGE][key] || key).replace(/\{(\w+)\}/g, (_, name) => values[name] ?? "");
+}
+function autoQueueMessage(state) {
+  if (!state.autoQueue) return "";
+  return state.autoQueueStatus === "loading" ? t("autoQueueLoading")
+    : state.autoQueueStatus === "unavailable" ? t("autoQueueUnavailable") : "";
 }
 for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
 for (const attr of ["title", "placeholder", "aria-label", "alt"]) {

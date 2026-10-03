@@ -537,6 +537,9 @@ function connectWs() {
 }
 
 function renderQueue(state) {
+  const autoQueueStatus = document.getElementById("auto-queue-status");
+  autoQueueStatus.textContent = document.body.dataset.admin === "true" ? autoQueueMessage(state)
+    : [t("autoQueue", { state: t(state.autoQueue ? "On" : "Off") }), autoQueueMessage(state)].filter(Boolean).join(" · ");
   const np = state.nowPlaying;
   const npEl = document.getElementById("now-playing");
   if (np) {
@@ -553,7 +556,7 @@ function renderQueue(state) {
       </div>`;
     npEl.querySelector(".np-title").textContent = np.title;
     npEl.querySelector(".np-sub").textContent =
-      (np.channel || "") + (np.addedBy ? ` · ${t("requester", { name: np.addedBy })}` : "");
+      [np.channel, np.autoQueued && t("autoQueued"), np.addedBy && t("requester", { name: np.addedBy })].filter(Boolean).join(" · ");
   } else {
     npEl.classList.add("hidden");
   }

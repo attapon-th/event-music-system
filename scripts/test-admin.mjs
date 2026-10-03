@@ -49,6 +49,18 @@ assert.deepEqual(sent.at(-1), { type: "setParticipantRole", id: "guest", enabled
 list.children[3].children[1].onclick();
 assert.deepEqual(sent.at(-1), { type: "setParticipantRole", id: "helper", enabled: false });
 assert.equal(node("admin-cooldown-label").textContent, "เวลารอ: 15 วินาที");
+assert.equal(node("admin-auto-queue").getAttribute("aria-pressed"), "false");
+node("admin-auto-queue").onclick();
+assert.deepEqual(sent.at(-1), { type: "setAutoQueue", enabled: true });
+state.autoQueue = true;
+state.autoQueueStatus = "loading";
+handlers.onState({ state, role: "admin", participants });
+assert.equal(node("admin-auto-queue").getAttribute("aria-pressed"), "true");
+assert.equal(node("admin-auto-queue").textContent, "เล่นต่ออัตโนมัติ: เปิด");
+assert.equal(node("auto-queue-status").textContent, "กำลังหาเพลงแนะนำ…");
+node("admin-auto-queue").onclick();
+assert.deepEqual(sent.at(-1), { type: "setAutoQueue", enabled: false });
+handlers.onState({ state, role: "admin", participants, cooldownSeconds: 15 });
 node("admin-cooldown").onclick();
 assert.deepEqual(sent.at(-1), { type: "setCooldown", seconds: 30 });
 handlers.onState({ state, code: "123", memberId: "helper", primaryAdminId: "owner", role: "controller", participants,

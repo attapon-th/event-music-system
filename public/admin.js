@@ -45,6 +45,10 @@ function connectAdmin() {
 function renderAdmin() {
   document.getElementById("admin-title").textContent = t("adminRoomTitle", { code: adminRoom.code || Room.code });
   document.title = document.getElementById("admin-title").textContent;
+  const autoQueueToggle = document.getElementById("admin-auto-queue");
+  autoQueueToggle.textContent = t("autoQueue", { state: t(adminState.autoQueue ? "On" : "Off") });
+  autoQueueToggle.setAttribute("aria-pressed", String(!!adminState.autoQueue));
+  document.getElementById("auto-queue-status").textContent = autoQueueMessage(adminState);
   document.getElementById("admin-cooldown-label").textContent = t("cooldown", { seconds: adminRoom.cooldownSeconds });
   renderParticipants();
   adminControls.forEach((el) => { el.disabled = !adminAuthenticated; });
@@ -137,7 +141,7 @@ function renderAdmin() {
 }
 
 function songMeta(item) {
-  return [item.channel, item.duration, item.addedBy && t("requester", { name: item.addedBy })].filter(Boolean).join(" · ");
+  return [item.channel, item.duration, item.autoQueued && t("autoQueued"), item.addedBy && t("requester", { name: item.addedBy })].filter(Boolean).join(" · ");
 }
 
 for (const action of ["play", "pause", "skip"]) {
@@ -177,4 +181,5 @@ document.getElementById("admin-cooldown").onclick = () => {
   const steps = [0, 5, 10, 15, 30, 60];
   adminSend({ type: "setCooldown", seconds: steps[(steps.indexOf(adminRoom.cooldownSeconds) + 1) % steps.length] });
 };
+document.getElementById("admin-auto-queue").onclick = () => adminSend({ type: "setAutoQueue", enabled: !adminState.autoQueue });
 Room.ready.then((joined) => { if (joined) connectAdmin(); });

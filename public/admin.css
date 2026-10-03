@@ -27,3 +27,5 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 #participants-list span { overflow-wrap: anywhere; }
 #participants-list button { min-width: 44px; min-height: 44px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px; background: var(--fill); color: var(--text); }
 #admin-cooldown { display: inline-flex; align-items: center; gap: 8px; font: 600 14px/1.4 var(--sans); }
+#admin-auto-queue { font: 600 14px/1.4 var(--sans); }
+#admin-auto-queue[aria-pressed="true"] { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); }

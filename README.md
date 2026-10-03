@@ -37,6 +37,8 @@ Built for a real graduation dinner in Hong Kong; designed to work for any event.
   don't know what to pick just tap.
 - 🎛 **Live controls** — play/pause/skip, volume and remove tracks on Player/Admin;
   per-guest request cooldown on Admin. Each room has independent settings, queue and playback, held only in memory.
+- 🔁 **Auto Queue** — optional YouTube Music radio after requested songs run out;
+  Player/Admin can toggle it, and new requests play after the current automatic song finishes.
 - 🔒 **Rooms** — three-digit codes and direct QR entry. `HOST_PASSWORD` creates rooms, only. The first Admin assigns/revokes Controller rights. Guest/Admin join by room number.
 - 🛡 **Queue guardrails** — duplicate rejection, per-phone cooldown (works
   behind venue NAT), 50-song cap, playability pre-check, and a watchdog that
@@ -205,7 +207,8 @@ changes last only for that Session.
 
 ```
 server.js                  Express + room-scoped WebSocket API and request pipeline
-src/youtube.js             No-key search scraping, oEmbed check, watch-page details
+src/youtube.js             No-key search/radio, oEmbed check, watch-page details
+src/auto-queue.js          Room-scoped recommendation preparation and late-reply guards
 src/moderation.js          Retained LLM content filter (paused; unused by the server)
 src/state.js               Authoritative in-memory queue
 src/sessions.js            Room lifecycle and credentials
@@ -216,6 +219,7 @@ public/admin.*             Authorized room controls and queue drag/drop
 public/session.*           Shared entry forms, credentials and reconnects
 public/i18n.js             Shared Thai UI dictionary + interpolation
 scripts/test.mjs           HTTP/WebSocket integration checks (isolated temporary server)
+scripts/test-auto-queue.mjs Auto Queue checks with simulated YouTube responses
 scripts/check-llm.mjs      Retained standalone LLM diagnostic (outside current development)
 Dockerfile                 Bun-based image
 docker-compose.yml         Home-server deployment (builds locally)
@@ -288,6 +292,20 @@ Admin แสดงชื่อเพลง รูป ระยะเวลาแ
 รีเฟรชหน้าแล้วรับ snapshot ปัจจุบันจาก server ทันที แต่ restart server จะล้าง queue
 รวมถึงข้อมูลห้องและการตั้งค่าทั้งหมด แต่ละห้องใช้ Player หนึ่งเครื่องเป็นแหล่งเสียง
 
+ปุ่ม **เล่นต่ออัตโนมัติ: เปิด/ปิด** อยู่บน Player และ Admin; Controller ใช้ได้ด้วย
+ห้องใหม่เริ่มต้นเป็นปิด และ Guest เห็นสถานะโดยเปลี่ยนค่าไม่ได้ เมื่อเปิดและคิวหลักว่าง
+ระบบเตรียมเพลงแนะนำจาก YouTube Music Radio ของเพลงล่าสุดไว้หนึ่งเพลงแยกจากคิวหลัก
+แล้วเล่นต่อเมื่อเพลงปัจจุบันจบ หากยังไม่เคยมีเพลง จะรอผู้ใช้เพิ่มเพลงแรก
+เพลงอัตโนมัติแสดงคำว่า **เพลงอัตโนมัติ** บนทุกหน้าจอ และคิวหลักยังนับเฉพาะคำขอของผู้ใช้
+หากมีคนเพิ่มเพลงขณะเพลงอัตโนมัติเล่นอยู่ เพลงปัจจุบันจะเล่นจบก่อน แล้วเล่นคิวหลักตามลำดับ
+ปิดปุ่มแล้วเพลงปัจจุบันเล่นต่อ แต่จะไม่เลือกเพลงอัตโนมัติถัดไป รีเฟรชหน้ายังคงค่าของห้อง
+
+Auto Queue ใช้ประเทศ/ภาษาจาก `DEFAULT_REGION`/`DEFAULT_LOCALE` และไม่ใช้บัญชี YouTube ของผู้ฟัง
+ตัดเพลงซ้ำกับเพลงปัจจุบัน คิวหลัก และประวัติ 100 เพลงล่าสุด รวมทั้งรายการที่ไม่ทราบความยาวหรือเกิน 10 นาที
+ตรวจความพร้อมเล่นสูงสุด 3 เพลงต่อครั้ง หากโหลดไม่ได้หรือไม่มีเพลงที่เหมาะสม จะแสดงข้อความและหยุดรอ
+หากเพลงอัตโนมัติเล่นไม่ได้ติดกัน 3 เพลง ระบบหยุดลองต่อ ผู้ใช้เริ่มรอบใหม่ได้ด้วยการปิด/เปิดปุ่มหรือเพิ่มเพลงใหม่
+YouTube Music ใช้ endpoint ภายในซึ่งอาจเปลี่ยนรูปแบบได้; เมื่อหาเพลงต่อไม่ได้ คิวที่ผู้ใช้เพิ่มยังทำงานตามปกติ
+
 ### API และ WebSocket
 
 ใช้ HTTP API เดิมสำหรับค้นหา/เพิ่มเพลง ไม่มี Admin queue REST API แยกชุด
@@ -314,9 +332,13 @@ Admin/Controller/Player ควบคุมคิวได้ แต่ `ended`/`
 | `playNow` | `{ id }` เปลี่ยนไปเล่นเพลงในคิวทันที |
 | `play` / `pause` | เปลี่ยนสถานะการเล่น แล้ว Player ใช้ IFrame API ตาม snapshot |
 | `setVolume` | `{ volume: 0–100 }` ปรับเสียง Player ของห้องผ่าน snapshot |
+| `setAutoQueue` | `{ enabled: true/false }`; Player/Admin/Controller เปิดหรือปิดการเล่นต่อเมื่อคิวหลักหมด |
 | `skip`, `remove`, `move` | Event เดิม; `remove` ใช้ `{ id }`, `move` ใช้ `{ id, dir: "up"/"down" }` |
 | `ended`, `error` | Event เดิมจาก Player; ข้ามเฉพาะเมื่อ `videoId` ตรงกับเพลงปัจจุบัน |
 | `error` (server → client) | `{ error: "ข้อความ" }` เมื่อไม่มีสิทธิ์หรือ reorder จาก queue เก่า |
+
+`state` เพิ่ม `autoQueue` (boolean) และ `autoQueueStatus` (`idle`, `loading`, `ready`, `unavailable`)
+`nowPlaying.autoQueued: true` ระบุเพลงอัตโนมัติ เพลงที่เตรียมไว้ไม่รวมอยู่ใน `state.queue`
 
 ### ทดสอบ
 
@@ -335,6 +357,9 @@ refresh/reconnect, สิทธิ์ผู้ใช้/กรณีไม่ต
 คำขอเพลงซ้ำพร้อมกัน และ country/locale ที่ส่งไป YouTube
 รวมหลายห้อง รับ Admin พร้อมกัน ให้/ถอน Controller กลับเข้า ปิดห้อง เลขซ้ำ ห้องเต็ม
 หมดอายุ connection ที่ไม่ตอบ heartbeat คำขอที่ค้างตอนหมดอายุ และ log เฉพาะสร้าง/ลบห้อง
+รวม Auto Queue: แปลง Radio response, เตรียมเพลงนอกคิว, ให้คิวหลักมาก่อน, เล่นต่อหลายเพลง,
+ปิด/เปิดหรือเพิ่มเพลงขณะโหลด, pause ขณะรอ, ปิดห้องขณะโหลด, เพลงซ้ำและจำนวนครั้งลองที่จำกัด
+พร้อมตรวจปุ่มและสถานะบน Player/Admin/Guest โดยจำลอง YouTube และ DOM
 
 ตรวจบน browser/TV จริงหลังตั้งค่า:
 
@@ -344,6 +369,9 @@ refresh/reconnect, สิทธิ์ผู้ใช้/กรณีไม่ต
 4. ลบเพลงหนึ่งรายการ แล้วกดเล่นตอนนี้กับเพลงที่รอ: Player ต้องเปลี่ยนเพลง
 5. กดหยุดชั่วคราว/เล่น/ข้าม และปรับเสียง: ตรวจเสียงกับภาพที่ TV
 6. รีเฟรช Admin: เพลง คิว สถานะ pause และ volume ต้องเหมือนเดิม
+   เปิดเล่นต่ออัตโนมัติบน Player/Admin ตรวจสถานะทั้งสามหน้าและห้องอื่น กดข้ามจนคิวหลักหมด
+   ต้องมีเพลงอัตโนมัติเล่นต่อ เพิ่มเพลงจาก Guest ระหว่างนั้น: เพลงใหม่ต้องเล่นหลังเพลงอัตโนมัติจบ
+   ปิดปุ่มระหว่างโหลดและระหว่างเล่น ตรวจว่าเพลงปัจจุบันไม่ถูกหยุด และไม่มีเพลงอัตโนมัติถัดไป
 7. ตรวจปุ่มประเภทงานบน Player และล้างคิวบน Admin ถูกซ่อน ไม่มีปุ่มตัวกรอง
    ปุ่มเวลารอแสดงค่าปัจจุบันและเปลี่ยนค่าได้ ตรวจช่องค้นหาบน iPhone และเพลงชื่อยาวไม่ดันปุ่ม + ออกข้างจอ
 8. เปิด Guest/Admin โดยไม่มีห้องต้องเห็นฟอร์มเลขห้อง; WebSocket ไม่มี token ต้องไม่เห็นคิวหรือควบคุมได้

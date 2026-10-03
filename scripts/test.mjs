@@ -14,6 +14,8 @@ import { createServer } from "node:net";
 import WebSocket from "ws";
 import { JukeboxState } from "../src/state.js";
 
+await import("./test-auto-queue.mjs");
+
 const root = resolve(import.meta.dirname, "..");
 const temp = mkdtempSync(join(tmpdir(), "event-music-test-"));
 for (const file of ["server.js", "src", "public", "package.json"]) cpSync(join(root, file), join(temp, file), { recursive: true });
@@ -49,6 +51,21 @@ globalThis.fetch = async (url, options) => {
   const body = JSON.parse(options.body);
   assert.equal(body.context.client.gl, process.env.DEFAULT_REGION || 'TH');
   assert.equal(body.context.client.hl, (process.env.DEFAULT_LOCALE || 'th-TH').split('-')[0]);
+  if (String(url).includes('/next?')) {
+    assert.equal(body.playlistId, 'RDAMVM' + body.videoId);
+    assert.equal(body.params, 'wAEB');
+    if (body.videoId === 'wait0000001') {
+      writeFileSync(new URL('./radio-started', import.meta.url), 'yes');
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    const contents = [body.videoId, 'auto0000001', 'auto0000002', 'auto0000003'].map(videoId => ({
+      playlistPanelVideoRenderer: { videoId, title: {simpleText: 'Radio ' + videoId},
+        shortBylineText: {runs:[{text:'Artist'}]}, lengthText: {simpleText:'3:20'} }
+    }));
+    return Response.json({contents:{singleColumnMusicWatchNextResultsRenderer:{tabbedRenderer:{watchNextTabbedResultsRenderer:{
+      tabs:[{tabRenderer:{content:{musicQueueRenderer:{content:{playlistPanelRenderer:{contents}}}}}}]
+    }}}}});
+  }
   if (String(url).includes('www.youtube.com/youtubei')) {
     assert.equal(body.context.client.clientName, 'WEB');
     assert.equal(body.params, 'EgIQAQ%3D%3D');
@@ -228,6 +245,10 @@ try {
   await waitFor(() => guest.messages.filter(m => m.type === "error").length > errorsBefore);
   send(guest, "setVolume", { volume: 29 });
   await waitFor(() => admin.snapshot.volume === 29);
+  send(guest, "setAutoQueue", { enabled: true });
+  await waitFor(() => admin.snapshot.autoQueue && player.snapshot.autoQueue);
+  send(admin, "setAutoQueue", { enabled: false });
+  await waitFor(() => !admin.snapshot.autoQueue && !player.snapshot.autoQueue);
   send(admin, "setParticipantRole", { id: loser.memberId, enabled: false });
   await waitFor(() => guest.messages.at(-1)?.role === "guest");
   const ownerErrors = admin.messages.filter(m => m.type === "error").length;
@@ -318,7 +339,45 @@ try {
   await waitFor(() => player.messages.some(msg => msg.code === "PLAYER_MOVED"));
   assert.deepEqual(oldTab.snapshot, admin.snapshot);
   assert.equal((await post("/api/sessions/close", {}, readOnly.token)).status, 403);
+  const autoErrors = otherRoom.messages.filter(msg => msg.type === "error").length;
+  send(otherRoom, "setAutoQueue", { enabled: true });
+  await waitFor(() => otherRoom.messages.filter(msg => msg.type === "error").length > autoErrors);
+  assert.equal(otherPlayer.snapshot.autoQueue, false, "Guest cannot toggle Auto Queue");
+  send(otherPlayer, "setAutoQueue", { enabled: "true" });
+  send(otherPlayer, "setVolume", { volume: 40 });
+  await waitFor(() => otherPlayer.snapshot.volume === 40);
+  assert.equal(otherPlayer.snapshot.autoQueue, false, "malformed toggles leave settings unchanged");
+  send(otherPlayer, "setAutoQueue", { enabled: true });
+  await waitFor(() => otherRoom.snapshot.autoQueueStatus === "ready");
+  assert.equal(admin.snapshot.autoQueue, false, "Auto Queue stays within its room");
+  const autoRefresh = await socket(memberB.token);
+  assert.equal(autoRefresh.snapshot.autoQueue, true, "refresh gets the authoritative toggle");
+  assert.equal(autoRefresh.snapshot.queue.length, 0, "prefetch does not add to the main queue");
+  send(otherPlayer, "ended", { videoId: "song0000001" });
+  await waitFor(() => otherRoom.snapshot.nowPlaying?.videoId === "auto0000001" && otherRoom.snapshot.autoQueueStatus === "ready");
+  assert.equal(otherRoom.snapshot.nowPlaying.autoQueued, true);
+  send(otherPlayer, "ended", { videoId: "song0000001" });
+  send(otherPlayer, "setAutoQueue", { enabled: false });
+  await waitFor(() => !otherRoom.snapshot.autoQueue);
+  assert.equal(otherRoom.snapshot.nowPlaying.videoId, "auto0000001", "disable/stale ended preserves the current song");
+  send(otherPlayer, "setAutoQueue", { enabled: true });
+  await waitFor(() => otherRoom.snapshot.autoQueueStatus === "ready");
+  requestToken = memberB.token;
+  assert.equal((await request("main0000001")).ok, true);
+  requestToken = requestInA;
+  await waitFor(() => otherRoom.snapshot.queue.length === 1);
+  assert.equal(otherRoom.snapshot.nowPlaying.videoId, "auto0000001");
+  send(otherPlayer, "ended", { videoId: "auto0000001" });
+  await waitFor(() => otherRoom.snapshot.nowPlaying?.videoId === "main0000001" && otherRoom.snapshot.autoQueueStatus === "ready");
+  send(otherPlayer, "ended", { videoId: "main0000001" });
+  await waitFor(() => otherRoom.snapshot.nowPlaying?.videoId === "auto0000002");
+  // Close the room with a radio response in flight; no late reply can recreate it.
+  assert.equal((await post("/api/request", { videoId: "wait0000001", title: "Pending radio", clientId: "radio-close" }, memberB.token)).status, 200);
+  await waitFor(() => otherRoom.snapshot.queue.some(item => item.videoId === "wait0000001"));
+  send(otherPlayer, "playNow", { id: otherRoom.snapshot.queue[0].id });
+  await waitFor(() => existsSync(join(temp, "radio-started")));
   assert.equal((await post("/api/sessions/close", {}, roomB.token)).status, 200);
+  await new Promise(resolve => setTimeout(resolve, 250));
   await waitFor(() => otherRoom.messages.some(msg => msg.code === "ROOM_CLOSED"));
   assert.equal((await fetch(base + "/api/info", { headers: auth(roomB.token) })).status, 401);
   send(unauthenticated, "auth", { token: adminToken, sessionId: roomB.sessionId });
@@ -385,7 +444,7 @@ try {
   assert.equal(changes, 0);
   assert.equal(state.reorder([]), true);
   assert.equal(existsSync(join(temp, "unexpected-ai-request")), false, "requests never call AI or fetch moderation metadata");
-  console.log("PASS: isolated rooms/queues/settings; primary Admin/Controller grant/revoke; room closing; heartbeat/expiry/in-flight requests; restart; lifecycle logs; rate limits; queue controls; Thailand search; unmodified video queries/order; AI disabled; validation.");
+  console.log("PASS: isolated rooms/queues/settings; primary Admin/Controller grant/revoke; Auto Queue authorization/sync/refresh/priority/closing; heartbeat/expiry/in-flight requests; restart; lifecycle logs; rate limits; queue controls; Thailand search; unmodified video queries/order; AI disabled; validation.");
 } finally {
   for (const ws of sockets) ws.terminate();
   if (child && child.exitCode === null) { child.kill(); await once(child, "exit"); }

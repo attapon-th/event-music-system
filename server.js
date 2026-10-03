@@ -17,7 +17,8 @@ import express from "express";
 import { WebSocketServer } from "ws";
 import QRCode from "qrcode";
 
-import { searchYouTube, fetchChartHits, checkPlayable } from "./src/youtube.js";
+import { searchYouTube, fetchChartHits, checkPlayable, durationSeconds } from "./src/youtube.js";
+import { updateAutoQueue } from "./src/auto-queue.js";
 import { Sessions } from "./src/sessions.js";
 import { detectLanIp } from "./src/net.js";
 
@@ -107,7 +108,11 @@ function memberInfo(member) {
 app.post("/api/sessions", checkAttempts, requirePassword, (_req, res) => {
   const room = sessions.create();
   if (!room) return res.status(409).json({ error: "ห้องเต็ม กรุณาลองใหม่ภายหลัง" });
-  room.state.onChange = room.onMembersChange = () => broadcastState(room);
+  room.onMembersChange = () => broadcastState(room);
+  room.state.onChange = () => {
+    broadcastState(room);
+    updateAutoQueue(room, () => sessions.get(room.code, room.id) === room, youtubeOptions);
+  };
   res.set("Cache-Control", "no-store").json(memberInfo(sessions.issue(room, "player")));
 });
 app.post("/api/sessions/join", checkAttempts, findRoom, (req, res) => {
@@ -158,10 +163,6 @@ const BROWSE_TTL_MS = 30 * 60 * 1000;
 // Browse is for singles only: hour-long "100 songs" compilation videos pass
 // YouTube's videos-only search filter, but no single track runs this long.
 const MAX_SINGLE_SECONDS = 10 * 60;
-function durationSeconds(d) {
-  if (!d || !/^[\d:]+$/.test(d)) return Infinity; // "LIVE"/unknown → not a single
-  return d.split(":").reduce((acc, part) => acc * 60 + Number(part), 0);
-}
 
 app.get("/api/browse", async (req, res) => {
   const q = (req.query.q || "").toString().trim().slice(0, 100);
@@ -362,7 +363,7 @@ wss.on("connection", (ws) => {
     switch (msg.type) {
       case "ended": // host player finished a track
       case "error": // host player couldn't play (embed-disabled/region-locked)
-        if (typeof msg.videoId === "string") state.advance(msg.videoId);
+        if (typeof msg.videoId === "string") state.advance(msg.videoId, msg.type === "error");
         break;
       case "skip":
         state.skip();
@@ -391,6 +392,9 @@ wss.on("connection", (ws) => {
         break;
       case "setVolume":
         state.setVolume(msg.volume);
+        break;
+      case "setAutoQueue":
+        state.setAutoQueue(msg.enabled);
         break;
       case "setParticipantRole": {
         const target = room.members.get(msg.id);
