@@ -10,24 +10,39 @@ const backToExploreBtn = document.getElementById("back-to-explore");
 // Shared tabs keep both panels mounted so search and live queue survive switching.
 const pageTabs = [document.getElementById("search-tab"), document.getElementById("queue-tab")];
 const pagePanels = ["search-panel", "queue-panel"];
+let activePageTab = 0;
 if (document.body.dataset.admin === "true") {
   pageTabs.push(document.getElementById("participants-tab"));
   pagePanels.push("participants-panel");
 }
 function selectPageTab(index) {
+  if (!pageTabs[index] || pageTabs[index].hidden) return;
+  activePageTab = index;
   pageTabs.forEach((tab, i) => {
     tab.setAttribute("aria-selected", String(i === index));
     tab.tabIndex = i === index ? 0 : -1;
     document.getElementById(pagePanels[i]).hidden = i !== index;
   });
 }
+function setParticipantsVisible(visible) {
+  const tab = document.getElementById("participants-tab");
+  tab.hidden = !visible;
+  if (!visible) {
+    document.getElementById("participants-panel").hidden = true;
+    if (activePageTab === 2) {
+      selectPageTab(0);
+      pageTabs[0].focus();
+    }
+  }
+}
 pageTabs.forEach((tab, index) => {
   tab.onclick = () => selectPageTab(index);
   tab.onkeydown = (event) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
-    const next = event.key === "Home" ? 0 : event.key === "End" ? pageTabs.length - 1
-      : (index + (event.key === "ArrowLeft" ? -1 : 1) + pageTabs.length) % pageTabs.length;
+    const visible = pageTabs.map((tab, i) => tab.hidden ? -1 : i).filter(i => i >= 0);
+    const next = event.key === "Home" ? visible[0] : event.key === "End" ? visible.at(-1)
+      : visible[(visible.indexOf(index) + (event.key === "ArrowLeft" ? -1 : 1) + visible.length) % visible.length];
     selectPageTab(next);
     pageTabs[next].focus();
   };
@@ -58,10 +73,13 @@ const THIS_YEAR = new Date().getFullYear();
 const GENRE_QUERIES = {
   // The first load uses the configured country's actual YouTube chart.
   All: ["__hits", `เพลงไทยยอดนิยม ${THIS_YEAR}`, `K-pop ${THIS_YEAR}`, "party anthems"],
-  // No singer chips for this tab on purpose — graduation songs are a theme,
-  // not an artist roster (no GENRE_SLUG entry, so the singer row stays empty).
-  Graduation: ["เพลงปัจฉิม", "เพลงมิตรภาพ", "graduation songs"],
   Thai: [`เพลงไทย ${THIS_YEAR}`, "T-pop", "เพลงไทยยอดนิยม"],
+  ThaiCountry: ["เพลงลูกทุ่ง", "เพลงลูกทุ่งยอดนิยม", `เพลงลูกทุ่ง ${THIS_YEAR}`],
+  ThaiLife: ["เพลงเพื่อชีวิต", "เพลงเพื่อชีวิตยอดนิยม", `เพลงเพื่อชีวิต ${THIS_YEAR}`],
+  ThaiOldies: ["เพลงลูกกรุง", "เพลงลูกกรุงยอดนิยม", `เพลงลูกกรุง ${THIS_YEAR}`],
+  ThaiRock: ["เพลงร็อกไทย", "เพลงร็อกไทยยอดนิยม", `เพลงร็อกไทย ${THIS_YEAR}`],
+  ThaiIndie: ["เพลงอินดี้ไทย", "เพลงอินดี้ไทยยอดนิยม", `เพลงอินดี้ไทย ${THIS_YEAR}`],
+  ThaiHipHop: ["เพลงฮิปฮอปไทย", "เพลงฮิปฮอปไทยยอดนิยม", `เพลงฮิปฮอปไทย ${THIS_YEAR}`],
   "K-pop": [`K-pop ${THIS_YEAR}`, "K-pop dance hits", "K-pop girl group hits"],
   Cantopop: [`Cantopop ${THIS_YEAR}`, "Hong Kong new songs", "Cantopop hits"],
   Mandopop: ["Mandopop new songs", `Mandopop ${THIS_YEAR}`, "Mandarin classics"],
@@ -71,10 +89,15 @@ const GENRE_QUERIES = {
 };
 // Display: Thai label + inline icon per genre (keys stay English — they
 // index GENRE_QUERIES and the singer-filter slugs).
-const GENRE_LABEL = { Thai: t("Thai"), All: t("All"), Graduation: t("Graduation songs"), "K-pop": "K-pop", Cantopop: t("Cantopop"), Mandopop: t("Mandopop"), Western: t("Western"), Party: t("Party"), Classics: t("Classics") };
+const GENRE_LABEL = { Thai: t("Thai"), All: t("All"), ThaiCountry: t("ThaiCountry"), ThaiLife: t("ThaiLife"), ThaiOldies: t("ThaiOldies"), ThaiRock: t("ThaiRock"), ThaiIndie: t("ThaiIndie"), ThaiHipHop: t("ThaiHipHop"), "K-pop": "K-pop", Cantopop: t("Cantopop"), Mandopop: t("Mandopop"), Western: t("Western"), Party: t("Party"), Classics: t("Classics") };
 const GENRE_ICON = { Thai: "♫",
   All: '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="2.6"/><circle cx="17" cy="7" r="2.6"/><circle cx="7" cy="17" r="2.6"/><circle cx="17" cy="17" r="2.6"/></svg>',
-  Graduation: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 9.5L12 5l9.5 4.5L12 14z"/><path d="M6.5 11.8v4.2c0 1.1 2.5 2.5 5.5 2.5s5.5-1.4 5.5-2.5v-4.2"/><path d="M21.5 9.5v5"/></svg>',
+  ThaiCountry: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 21V10l9-7 9 7v11M8 21v-7h8v7"/></svg>',
+  ThaiLife: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m14 10 6-6m-4 0 4 4M12 9c-3-3-6 0-5 3-4-1-6 3-3 6s7 1 6-3c3 1 6-2 2-6Z"/></svg>',
+  ThaiOldies: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 5a7 7 0 0 1 7 7"/></svg>',
+  ThaiRock: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m13 2-9 12h7l-1 8 10-13h-7Z"/></svg>',
+  ThaiIndie: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1Z"/></svg>',
+  ThaiHipHop: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg>',
   "K-pop": '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7.2-4.4-9.7-9.1A5 5 0 0112 5.6a5 5 0 019.7 5.3C19.2 15.6 12 20 12 20z"/></svg>',
   Cantopop: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9.3" y="2.8" width="5.4" height="10.5" rx="2.7"/><path d="M6.3 11a5.7 5.7 0 0011.4 0"/><path d="M12 16.7v3.3M9.3 20h5.4"/></svg>',
   Mandopop: '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4v9.6a3.4 3.4 0 101.6 2.9V8.6l5.9-1.4V4l-7.5 2z"/></svg>',
@@ -203,10 +226,11 @@ function renderGenreTabs() {
 
 function renderSingers() {
   const row = document.getElementById("singers");
+  if (row.hidden) return; // Keep the roster available for a later UI change.
   row.innerHTML = "";
   const list =
     activeGenre === "All" ? SINGERS : SINGERS.filter((s) => s.g === GENRE_SLUG[activeGenre]);
-  // Genres without a GENRE_SLUG entry (e.g. Graduation) have no singer roster —
+  // Genres without a GENRE_SLUG entry have no singer roster —
   // hide the row instead of leaving an empty strip.
   row.classList.toggle("hidden", list.length === 0);
   for (const s of list) {
@@ -225,7 +249,7 @@ function selectGenre(g) {
   activeKey = `genre:${g}`;
   renderGenreTabs();
   renderSingers();
-  startBrowse(GENRE_QUERIES[g]);
+  return startBrowse(GENRE_QUERIES[g]);
 }
 
 function selectSinger(s) {
@@ -390,7 +414,7 @@ const clientId =
     return id;
   })();
 
-// Shared nickname on Guest/Admin, kept across refreshes on this browser.
+// Guest/Admin share a nickname within a room, including refresh and reconnect.
 const NICKNAMES = [
   "กุ้ง", "ก้อง", "แก้ม", "กิ๊ฟ", "เก่ง", "ไก่", "ข้าว", "ขวัญ", "ไข่มุก", "เข็ม",
   "ครีม", "เค้ก", "คิม", "คิว", "แคท", "จอย", "จูน", "จ๋า", "เจี๊ยบ", "แจน",
@@ -403,12 +427,18 @@ const NICKNAMES = [
   "โม", "แยม", "ยุ้ย", "ยู", "ริบบิ้น", "รุ้ง", "โรส", "ลิลลี่", "ลูกแก้ว", "เล็ก",
   "ว่าน", "วิว", "ส้ม", "ทราย", "ออม", "อาย", "อิง", "เอม", "โอ๊ต", "ไอซ์",
 ];
-const savedNickname = localStorage.getItem("guestNickname");
-const nickname = NICKNAMES.includes(savedNickname)
-  ? savedNickname : NICKNAMES[Math.floor(Math.random() * NICKNAMES.length)];
-localStorage.setItem("guestNickname", nickname);
-document.getElementById("request-title").textContent = t("addSongBy", { nickname });
-document.title = t("addSongBy", { nickname });
+let nickname;
+function initNickname() {
+  const key = Room.sessionId ? `music-nickname:${Room.sessionId}` : "guestNickname";
+  const savedNickname = localStorage.getItem(key);
+  const choices = NICKNAMES.filter(name => name !== localStorage.getItem("guestNickname"));
+  nickname = NICKNAMES.includes(savedNickname)
+    ? savedNickname : choices[Math.floor(Math.random() * choices.length)];
+  localStorage.setItem(key, nickname);
+  localStorage.setItem("guestNickname", nickname);
+  document.getElementById("request-title").textContent = t("addSongBy", { nickname });
+  document.title = t("addSongBy", { nickname });
+}
 
 // ---- Own requests (for the "YOU" badge in the queue) -------------------
 function loadMyRequestIds() {
@@ -591,6 +621,7 @@ function renderQueue(state) {
 renderSingers();
 Room.ready.then((joined) => {
   if (!joined) return;
+  initNickname();
   selectGenre("All");
   if (document.body.dataset.admin !== "true") connectWs();
 });

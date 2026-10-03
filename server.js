@@ -39,6 +39,12 @@ const DEFAULT_REGION = /^[A-Za-z]{2}$/.test(process.env.DEFAULT_REGION || "") ? 
 const DEFAULT_LOCALE = process.env.DEFAULT_LOCALE || "th-TH";
 const youtubeOptions = { region: DEFAULT_REGION, locale: DEFAULT_LOCALE };
 
+const HOST_PASSWORD = process.env.HOST_PASSWORD || "";
+if (HOST_PASSWORD.length < 4 || /[^0-9]/.test(HOST_PASSWORD)) {
+  console.error("HOST_PASSWORD ต้องเป็นตัวเลข 0–9 อย่างน้อย 4 หลัก จึงจะเริ่ม server ได้");
+  process.exit(1);
+}
+
 const PORT = parseInt(process.env.PORT || "45416", 10);
 const LAN_IP = detectLanIp(process.env.HOST_IP);
 // PUBLIC_URL (e.g. https://grad-din-music.hangton.net) takes precedence when the
@@ -58,7 +64,6 @@ app.set("trust proxy", true); // behind a reverse proxy — req.ip should read X
 app.use(express.json());
 
 // The creation password authorizes new rooms only.
-const HOST_PASSWORD = process.env.HOST_PASSWORD || "";
 const failedAttempts = new Map();
 const hash = (value) => createHash("sha256").update(value).digest();
 function tokenFrom(req) {
@@ -70,17 +75,18 @@ function fail(req, res, status, error) {
   if (!entry || now - entry.at >= 60000) entry = { at: now, count: 0 };
   entry.count++;
   failedAttempts.set(req.ip, entry);
-  return res.status(status).json({ error });
+  return res.status(status).json({ error, retryIn: 5 });
 }
 function checkAttempts(req, res, next) {
   const entry = failedAttempts.get(req.ip);
   if (entry && Date.now() - entry.at < 60000 && entry.count >= 10) {
-    return res.status(429).json({ error: "ลองไม่สำเร็จหลายครั้ง กรุณารอหนึ่งนาที" });
+    const retryIn = Math.ceil((60000 - (Date.now() - entry.at)) / 1000);
+    return res.status(429).set("Retry-After", String(retryIn))
+      .json({ error: "ลองไม่สำเร็จหลายครั้ง กรุณารอก่อนลองใหม่", retryIn });
   }
   next();
 }
 function requirePassword(req, res, next) {
-  if (!HOST_PASSWORD) return res.status(503).json({ error: "กรุณาตั้งรหัสสร้างก่อนใช้งาน" });
   const password = req.body?.password;
   if (typeof password !== "string" || !timingSafeEqual(hash(password), hash(HOST_PASSWORD))) {
     return fail(req, res, 401, "รหัสสร้างไม่ถูกต้อง");
@@ -277,7 +283,7 @@ app.post("/api/request", requireMember, async (req, res) => {
 const BOOT_ID = Date.now().toString(36);
 function versionedPage(name) {
   return readFileSync(path.join(__dirname, "public", name), "utf8").replace(
-    /(href|src)="\/((?:guest|host|admin|i18n|session)\.(?:css|js))"/g,
+    /(href|src)="\/((?:guest|host|admin|i18n|session|pwa)\.(?:css|js))"/g,
     `$1="/$2?v=${BOOT_ID}"`
   );
 }
@@ -305,7 +311,7 @@ function stateMessage(room, member) {
     filterOn: room.filterOn, moderationMode: room.moderationMode,
     cooldownSeconds: room.cooldownSeconds, eventContext: room.eventContext,
     primaryAdminId: room.primaryAdminId, memberId: member.id, role: member.role,
-    ...(["admin", "controller"].includes(member.role) ? { participants: [...room.members.values()].map(person => ({
+    ...(member.role === "admin" ? { participants: [...room.members.values()].map(person => ({
       id: person.id, name: person.name, role: person.role, online: online.has(person.id),
     })) } : {}),
   });
@@ -345,6 +351,17 @@ wss.on("connection", (ws) => {
         }
       }
       if (member.role !== "player" && typeof msg.name === "string" && msg.name.trim()) member.name = msg.name.trim().slice(0, 40);
+      // Reconcile tracks consumed from the Player's last snapshot while offline.
+      // Item IDs prevent replay from skipping a later request for the same video.
+      if (member.role === "player" && Array.isArray(msg.completed) && msg.completed.length <= 51) {
+        for (const item of msg.completed) {
+          if (item && typeof item.id === "string" && typeof item.videoId === "string" &&
+              typeof item.failed === "boolean" && member.room.state.nowPlaying?.id === item.id &&
+              member.room.state.nowPlaying.videoId === item.videoId) {
+            member.room.state.advance(item.videoId, item.failed);
+          }
+        }
+      }
       sessions.attach(ws, member);
       ws.send(JSON.stringify({ type: "auth", ok: true, role: member.role }));
       broadcastState(member.room);

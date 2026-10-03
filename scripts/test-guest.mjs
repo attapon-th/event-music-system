@@ -29,7 +29,11 @@ const storage = new Map([["guestName", "ชื่อเดิม"]]);
 const document = {
   body: { dataset: { admin: "true" } },
   getElementById(id) {
-    if (!elements.has(id)) elements.set(id, element());
+    if (!elements.has(id)) {
+      const node = element();
+      node.hidden = ["singers", "participants-tab"].includes(id);
+      elements.set(id, node);
+    }
     return elements.get(id);
   },
   createElement: element,
@@ -82,7 +86,22 @@ const reloadDocument = { ...document, getElementById(id) {
   return reloadElements.get(id);
 } };
 runInContext(source, createContext({ ...context, document: reloadDocument, localStorage: context.localStorage }));
+await Promise.resolve();
 assert.equal(storage.get("guestNickname"), nickname, "nickname survives reload and is shared by both pages");
+
+run("Room.sessionId = 'first-room'; initNickname();");
+const firstRoomNickname = run("nickname");
+assert.notEqual(firstRoomNickname, nickname, "Entering a new room picks a different nickname");
+run("initNickname();");
+assert.equal(run("nickname"), firstRoomNickname, "Reconnecting to the same room keeps the nickname");
+run("Room.sessionId = 'second-room'; initNickname();");
+assert.notEqual(run("nickname"), firstRoomNickname, "A different session gets a new nickname even if its room number is reused");
+run("Room.sessionId = 'first-room'; initNickname();");
+assert.equal(run("nickname"), firstRoomNickname, "Returning to a live room restores its participant nickname");
+// Keep the existing request-attribution checks on their original nickname.
+run("Room.sessionId = undefined; initNickname();");
+storage.set("guestNickname", nickname);
+run("initNickname();");
 
 run("selectPageTab(1)");
 assert.equal(document.getElementById("search-panel").hidden, true);
@@ -93,9 +112,19 @@ document.getElementById("queue-tab").onkeydown({ key: "Home", preventDefault() {
 assert.equal(document.getElementById("search-panel").hidden, false);
 assert.equal(document.getElementById("queue-panel").hidden, true);
 assert.equal(document.getElementById("search-tab").focused, true);
-run("selectPageTab(2)");
+run("setParticipantsVisible(true); selectPageTab(2)");
 assert.equal(document.getElementById("participants-panel").hidden, false);
 assert.equal(document.getElementById("search-panel").hidden, true);
+run("setParticipantsVisible(false)");
+assert.equal(document.getElementById("participants-panel").hidden, true, "Revocation hides an open participant panel");
+assert.equal(document.getElementById("search-panel").hidden, false);
+assert.equal(document.getElementById("search-tab").focused, true);
+run("selectPageTab(2)");
+assert.equal(document.getElementById("participants-panel").hidden, true, "Hidden tabs cannot be opened programmatically");
+document.getElementById("queue-tab").onkeydown({ key: "End", preventDefault() {} });
+assert.equal(document.getElementById("queue-tab").focused, true, "End skips the hidden participants tab");
+document.getElementById("queue-tab").onkeydown({ key: "ArrowRight", preventDefault() {} });
+assert.equal(document.getElementById("search-tab").focused, true, "Arrow navigation wraps through visible tabs only");
 run("selectPageTab(0)");
 for (const page of ["guest", "admin"]) {
   const html = readFileSync(new URL(`../public/${page}.html`, import.meta.url), "utf8");
@@ -109,7 +138,7 @@ for (const page of ["guest", "admin"]) {
   assert.match(html, /id="mode-videos"[^>]+data-i18n="videos"/, `${page}: video button uses the shared label`);
   assert.match(html, /<section id="suggestions-section">/);
   assert.match(html, /id="shuffle" class="shuffle"/);
-  assert.match(html, /id="singers" class="singers"/);
+  assert.match(html, /id="singers" class="singers" hidden/);
   assert.match(html, /id="genre-tabs" class="genre-tabs"/);
 }
 
@@ -210,7 +239,22 @@ assert.equal(document.getElementById("suggestions-section").classList.contains("
 assert.equal(document.getElementById("back-to-explore").classList.contains("hidden"), true);
 assert.equal(exploreCalls, 1);
 assert.equal(document.getElementById("genre-tabs").children.length, run("Object.keys(GENRE_QUERIES).length"));
-assert.ok(document.getElementById("singers").children.length > 0);
+assert.equal(document.getElementById("singers").hidden, true);
+assert.equal(document.getElementById("singers").children.length, 0, "Hidden artist lists are retained without rendering chips");
+assert.equal(run("SINGERS.length > 0"), true);
+assert.deepEqual(JSON.parse(run("JSON.stringify(Object.keys(GENRE_QUERIES))")),
+  ["All", "Thai", "ThaiCountry", "ThaiLife", "ThaiOldies", "ThaiRock", "ThaiIndie", "ThaiHipHop", "K-pop", "Cantopop", "Mandopop", "Western", "Party", "Classics"]);
+for (const genre of ["ThaiCountry", "ThaiLife", "ThaiOldies", "ThaiRock", "ThaiIndie", "ThaiHipHop"]) {
+  context.fetch = async url => {
+    const query = new URL(url, "http://localhost").searchParams.get("q");
+    assert.equal(run(`GENRE_QUERIES.${genre}.includes(${JSON.stringify(query)})`), true);
+    return response(songs(600, 5));
+  };
+  await run(`selectGenre(${JSON.stringify(genre)})`);
+  assert.equal(results.children.length, 5);
+  assert.equal(run(`GENRE_ICON.${genre}.includes('<svg')`), true);
+  assert.equal(run(`GENRE_QUERIES.${genre}.length`), 3);
+}
 
 run("toast = () => ({ set() {}, dismiss() {} })");
 context.fetch = async (url, options) => {

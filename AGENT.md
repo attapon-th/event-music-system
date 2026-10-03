@@ -55,12 +55,18 @@ There is no frontend bundler or compilation step.
 - Playback state and volume belong to the server snapshot. Player applies them
   through the IFrame API; Admin remains a controller rather than an audio source.
   New rooms start at 60% volume, applied before loading the first video.
-- `HOST_PASSWORD` authorizes room creation only. The root page only creates rooms;
-  Guest entry uses a room number. Empty password disables creation.
+- `HOST_PASSWORD` authorizes room creation and contains only ASCII digits, at least
+  four digits; invalid configuration exits before listening. Existing nonnumeric
+  passwords must be replaced before restarting. Root entry displays digits openly
+  in a text input with a numeric keyboard hint and accepts either this password or
+  a three-digit room number using the existing join API. Keep credentials as strings
+  to preserve leading zeros. Failed entry
+  locks browser submission for five seconds; HTTP 429 carries the remaining retry time.
 - Every WebSocket authenticates a room credential before receiving a snapshot.
   Check membership on every command; only Player reports completion/errors, and
   only the primary Admin grants/revokes Controller rights. Controllers manage playback
-  and settings, but cannot change roles. State messages trigger role redirects.
+  and settings. Only the primary Admin receives the participant roster and tab.
+  Role changes update keyboard tab navigation and trigger role redirects.
 - All room data is in memory. Last-disconnect starts the 60-minute idle deadline;
   live connections cancel it, heartbeat removes dead ones, and restart clears all rooms.
   Seed each room's settings from environment defaults. stdout logs only create/delete.
@@ -90,11 +96,19 @@ There is no frontend bundler or compilation step.
   and 16px search inputs. Wrap long result metadata inside its shrinking flex column.
   Player event context and Admin clear are hidden; the filter button is removed.
   Admin cooldown shows its value in the button. `/g` redirects to `/guest` with queries intact.
-- Player entry shows the welcome screen first. Start reveals an unlabeled password
+- Keep Thai genres in the documented order and artist chips hidden while retaining
+  their data. Room nicknames survive refresh/reconnect within the same session.
+- Player entry shows the welcome screen first. Start reveals the shared credential
   field with an accessible name and icon-only next button; successful creation opens
   Player, and closing the room restores welcome. Handle autoplay blocking with
   the existing play button without skipping tracks. Preserve playback-error handling,
   the watchdog's hidden-tab/buffering exceptions, and reconnect authentication.
+- Disconnect keeps cached playback running. Player reconciles finished item IDs
+  before accepting a reconnect snapshot; a missing room drains its cached queue
+  before returning to welcome. Explicit close and Player takeover stop immediately.
+- All pages share the install manifest and qp assets. Install UI belongs to the
+  welcome screen only and hides while a room is active. Installation uses
+  native browser prompts or iOS home-screen instructions, without a service worker.
 - Keep static-asset revalidation and versioned page asset URLs; open clients and
   mobile browsers otherwise retain outdated scripts after deployment.
 

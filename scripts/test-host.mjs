@@ -80,11 +80,17 @@ for (const earlyReady of [false, true]) {
     WebSocket: class { readyState = 1; send(data) { messages.push(JSON.parse(data)); } },
   });
   context.Room = {
-    ready: Promise.resolve(true), token: "test-token",
+    ready: Promise.resolve(true), token: "test-token", connected: true,
     fetch: async () => ({ code: "123", guestUrl: "http://localhost/guest", filterOn: false, moderationMode: "default" }),
-    send: (message) => messages.push(message),
+    send(message) { if (!this.connected) return false; messages.push(message); return true; },
+    finish(message) { this.token = null; context.roomFinished = message; context.stopLocalPlayer(); },
     connect(handlers) {
-      return { onmessage({ data }) {
+      return {
+        authData: () => handlers.authData?.(),
+        onauth() { context.Room.connected = true; handlers.onAuth?.(); },
+        onclose() { context.Room.connected = false; handlers.onOffline?.(); },
+        unavailable(message) { context.Room.connected = false; return handlers.onUnavailable?.(message); },
+        onmessage({ data }) {
         const msg = JSON.parse(data);
         if (msg.type === "state") handlers.onState({ filterOn: false, moderationMode: "default", cooldownSeconds: 15, eventContext: "", ...msg });
         if (msg.type === "sessionEnded") handlers.onEnd();
@@ -111,7 +117,7 @@ for (const earlyReady of [false, true]) {
       };
       apiReady = () => context.onYouTubeIframeAPIReady?.();
       if (earlyReady) apiReady();
-    } else if (src !== "/session.js") {
+    } else if (!["/session.js", "/pwa.js"].includes(src)) {
       runInContext(readFileSync(new URL(src.slice(1), publicDir), "utf8"), context);
     }
   }
@@ -134,6 +140,11 @@ for (const earlyReady of [false, true]) {
   const firstLoad = calls.findIndex(([action]) => action === "load");
   assert.deepEqual(calls[firstLoad - 1], ["volume", 37], "Apply room volume before loading its first song");
   assert.equal(state, 1, "Auto start must play the current song");
+  const loadsBeforeDisconnect = calls.filter(([action]) => action === "load").length;
+  runInContext("ws.onclose();", context);
+  assert.equal(state, 1, "Connection loss must keep the current song playing");
+  assert.equal(calls.filter(([action]) => action === "load").length, loadsBeforeDisconnect);
+  runInContext("ws.onauth();", context);
   runInContext("latestState.paused = true; syncPlayer();", context);
   assert.equal(state, 2);
   runInContext("latestState.paused = false; syncPlayer();", context);
@@ -260,6 +271,58 @@ for (const earlyReady of [false, true]) {
   assert.equal(document.activeElement.dataset.queueId, "queued-1", "Queue broadcasts preserve remote selection");
   runInContext("latestState.queue = []; render();", context);
   assert.equal(document.activeElement, skip, "Removing focused track returns focus to a visible control");
+  const snapshot = (nowPlaying, queue = []) => runInContext(`ws.onmessage({ data: JSON.stringify({ type: "state", state: {
+    nowPlaying: ${JSON.stringify(nowPlaying)}, queue: ${JSON.stringify(queue)}, paused: false, volume: 37
+  } }) });`, context);
+  const track = n => ({ id: `offline-${n}`, videoId: `offline000${n}`, title: `Offline ${n}`, channel: "Artist" });
+  snapshot(track(1), [track(2), track(3)]);
+  runInContext("ws.onclose();", context);
+  const finishSong = () => { state = 0; playerEvents.onStateChange({ data: 0 }); };
+  finishSong();
+  assert.equal(runInContext("currentVideoId", context), track(2).videoId, "Offline completion plays the next cached song");
+  playerEvents.onError({ data: 100 });
+  assert.equal(runInContext("currentVideoId", context), track(3).videoId, "Unplayable offline tracks do not block the remaining queue");
+  const recovery = JSON.parse(JSON.stringify(runInContext("ws.authData()", context)));
+  assert.deepEqual(recovery.completed, [
+    { id: track(1).id, videoId: track(1).videoId, failed: false },
+    { id: track(2).id, videoId: track(2).videoId, failed: true },
+  ]);
+  const loadsBeforeRecovery = calls.filter(([action]) => action === "load").length;
+  runInContext("ws.onauth();", context);
+  snapshot(track(3), [track(4)]);
+  assert.equal(calls.filter(([action]) => action === "load").length, loadsBeforeRecovery, "Recovery keeps the current song at its current position");
+  assert.equal(runInContext("completedOffline.length", context), 0);
+  // The last completion may have been sent into a connection that silently died.
+  finishSong();
+  runInContext("ws.onclose();", context);
+  assert.equal(runInContext("currentVideoId", context), track(4).videoId, "Unacknowledged completion advances after disconnect is detected");
+  snapshot(track(4), [track(5)]);
+  assert.equal(runInContext('ws.unavailable("ห้องหาย")', context), true);
+  assert.equal(state, 1, "A lost room keeps its remaining cached queue playing");
+  finishSong();
+  assert.equal(context.roomFinished, undefined, "Do not return to entry while cached songs remain");
+  assert.equal(runInContext("currentVideoId", context), track(5).videoId);
+  finishSong();
+  assert.equal(context.roomFinished, "ห้องหาย", "Return to entry only once the final cached song finishes");
+  assert.equal(state, -1);
+  assert.equal(runInContext('ws.unavailable("ห้องหาย")', context), false, "An empty lost room returns immediately");
+  context.Room.token = "test-token";
+  runInContext("ws.onauth();", context);
+  snapshot(track(6), [track(7), track(8)]);
+  runInContext("ws.onclose();", context);
+  finishSong();
+  runInContext("ws.authData();", context);
+  finishSong(); // Another track ends while the reconnect auth is in flight.
+  const loadsDuringAuth = calls.filter(([action]) => action === "load").length;
+  runInContext("ws.onauth();", context);
+  assert.equal(messages.at(-1).type, "auth");
+  assert.equal(messages.at(-1).completed[0].id, track(7).id, "Reconcile completions that arrived during authentication");
+  snapshot(track(7), [track(8)]);
+  assert.equal(runInContext("currentVideoId", context), track(8).videoId, "An in-flight snapshot must not rewind offline playback");
+  runInContext("ws.onauth();", context);
+  snapshot(track(8));
+  assert.equal(calls.filter(([action]) => action === "load").length, loadsDuringAuth);
+  snapshot(track(6));
   await fullscreen.click();
   context.Room.token = null;
   runInContext('ws.onmessage({data: JSON.stringify({type: "sessionEnded"})})', context);

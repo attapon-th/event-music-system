@@ -3,6 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#211827" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="คิวเพลิน" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="/icons/qp.svg" />
+  <link rel="icon" sizes="16x16 32x32" href="/favicon.ico" />
+  <link rel="apple-touch-icon" href="/icons/qp-180.png" />
   <title data-i18n="admin">ผู้ดูแลเพลง</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -36,7 +43,7 @@
   <div class="page-tabs" role="tablist" aria-label="ค้นหาและคิวเพลง">
     <button id="search-tab" type="button" role="tab" aria-selected="true" aria-controls="search-panel"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m15.1 15.1 4.4 4.4"/></svg><span data-i18n="Search"></span></button>
     <button id="queue-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-panel" tabindex="-1"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h12"/></svg><span data-i18n="queue"></span></button>
-    <button id="participants-tab" type="button" role="tab" aria-selected="false" aria-controls="participants-panel" tabindex="-1" data-i18n="participants"></button>
+    <button id="participants-tab" type="button" role="tab" aria-selected="false" aria-controls="participants-panel" tabindex="-1" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 4a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 5v2"/></svg><span data-i18n="participants"></span></button>
   </div>
 
   <section id="search-panel" role="tabpanel" aria-labelledby="search-tab">
@@ -63,7 +70,7 @@
           <span data-i18n="Shuffle"></span>
         </button>
       </div>
-      <div id="singers" class="singers"></div>
+      <div id="singers" class="singers" hidden></div>
       <div id="genre-tabs" class="genre-tabs"></div>
     </section>
 

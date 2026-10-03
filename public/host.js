@@ -11,6 +11,11 @@ let appliedPaused = null;
 let latestState = { nowPlaying: null, queue: [] };
 let eventContext = "";
 let ws = null;
+let completedOffline = [];
+let completedSentCount = 0;
+let recovering = false;
+let pendingCompletion = null;
+let roomLostMessage = null;
 
 // ---- WebSocket --------------------------------------------------------
 function stopLocalPlayer() {
@@ -19,28 +24,78 @@ function stopLocalPlayer() {
   currentVideoId = null;
   appliedPaused = null;
   playbackTarget = null;
+  completedOffline = [];
+  completedSentCount = 0;
+  recovering = false;
+  pendingCompletion = null;
+  roomLostMessage = null;
   if (!Room.token && isVideoFullscreen()) toggleFullscreen();
 }
 
 function reportIfEnded() {
-  if (playerReady && currentVideoId && player.getPlayerState?.() === YT.PlayerState.ENDED) {
-    send({ type: "ended", videoId: currentVideoId });
+  if (pendingCompletion) finishTrack(pendingCompletion.type, pendingCompletion.code);
+  else if (playerReady && currentVideoId && player.getPlayerState?.() === YT.PlayerState.ENDED) finishTrack("ended");
+}
+
+function finishTrack(type, code) {
+  const track = latestState.nowPlaying;
+  if (!track || track.videoId !== currentVideoId) return;
+  const report = { type, videoId: track.videoId, code };
+  if (!recovering && Room.send(report)) {
+    pendingCompletion = { ...report, id: track.id };
+    return;
   }
+  pendingCompletion = null;
+  completedOffline.push({ id: track.id, videoId: track.videoId, failed: type === "error" });
+  latestState = { ...latestState, nowPlaying: latestState.queue[0] || null,
+    queue: latestState.queue.slice(1), paused: false };
+  render(); syncPlayer();
+  if (roomLostMessage && !latestState.nowPlaying) Room.finish(roomLostMessage);
 }
 
 function connectWs() {
+  function authData() {
+    recovering = true;
+    completedSentCount = completedOffline.length;
+    return { completed: completedOffline.slice() };
+  }
   ws = Room.connect({
-    onAuth() { reportIfEnded(); },
+    authData,
+    onAuth() {
+      completedOffline.splice(0, completedSentCount);
+      pendingCompletion = null;
+      // A song can finish while authentication is in flight. Reconcile it too
+      // before accepting a snapshot that would replay that song.
+      if (completedOffline.length) {
+        send({ type: "auth", token: Room.token, sessionId: Room.sessionId, ...authData() });
+        return;
+      }
+      recovering = false;
+      loadInfo();
+    },
     onState(msg) {
+      if (recovering) return;
+      if (pendingCompletion && (pendingCompletion.id !== msg.state.nowPlaying?.id ||
+          pendingCompletion.videoId !== msg.state.nowPlaying?.videoId)) pendingCompletion = null;
       latestState = msg.state;
       eventContext = msg.eventContext;
       render(); renderContext(); syncPlayer();
     },
-    onOffline: stopLocalPlayer,
+    onOffline() {
+      document.getElementById("guest-url").textContent = t("offlinePlayback");
+      reportIfEnded();
+    },
+    onUnavailable(message) {
+      if (!latestState.nowPlaying && !latestState.queue.length) return false;
+      roomLostMessage = message;
+      document.getElementById("guest-url").textContent = t("roomLostPlayback");
+      reportIfEnded();
+      return true;
+    },
     onEnd: stopLocalPlayer,
   });
 }
-function send(obj) { Room.send(obj); }
+function send(obj) { return Room.send(obj); }
 
 // ---- YouTube IFrame API ----------------------------------------------
 window.onYouTubeIframeAPIReady = function () {
@@ -69,7 +124,7 @@ window.onYouTubeIframeAPIReady = function () {
           document.getElementById("playpause").title = t("Play / Pause (space)");
         }
         if (e.data === YT.PlayerState.ENDED) {
-          send({ type: "ended", videoId: currentVideoId });
+          finishTrack("ended");
         }
         if (started && [YT.PlayerState.PLAYING, YT.PlayerState.PAUSED].includes(e.data)) {
           const paused = e.data === YT.PlayerState.PAUSED;
@@ -77,14 +132,16 @@ window.onYouTubeIframeAPIReady = function () {
             if (paused === playbackTarget) playbackTarget = null;
             else if (playbackTarget) player.pauseVideo();
             else player.playVideo();
-          } else if (paused !== latestState.paused) send({ type: paused ? "pause" : "play" });
+          } else if (paused !== latestState.paused) {
+            if (!send({ type: paused ? "pause" : "play" })) latestState.paused = paused;
+          }
         }
         updatePlayPauseIcon();
       },
       onError: (e) => {
         // 101/150 = embedding disabled by owner; 100 = removed; 2 = bad id.
         console.warn("Player error", e.data, "on", currentVideoId);
-        send({ type: "error", videoId: currentVideoId, code: e.data });
+        finishTrack("error", e.data);
       },
     },
   });
@@ -144,7 +201,7 @@ function armPlaybackWatchdog(videoId) {
       return;
     }
     console.warn(`[watchdog] ${videoId} never started (state ${s}) — skipping`);
-    send({ type: "error", videoId, code: "watchdog" });
+    finishTrack("error", "watchdog");
   }, 20000);
 }
 
@@ -393,6 +450,11 @@ function openPlayer() {
   currentVideoId = null;
   appliedPaused = null;
   latestState = { nowPlaying: null, queue: [], paused: false, volume: 60 };
+  completedOffline = [];
+  completedSentCount = 0;
+  recovering = false;
+  pendingCompletion = null;
+  roomLostMessage = null;
   loadInfo();
   connectWs();
   document.getElementById("playpause").focus();

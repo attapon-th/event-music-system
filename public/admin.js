@@ -21,6 +21,7 @@ function adminSend(message) {
 function connectAdmin() {
   Room.connect({
     onAuth(msg) {
+      adminRoom.role = msg.role;
       adminAuthenticated = ["admin", "controller"].includes(msg.role);
       document.getElementById("connection").textContent = t(adminAuthenticated ? "connected" : "authFailed");
       renderAdmin();
@@ -157,6 +158,9 @@ document.getElementById("admin-volume").oninput = (event) => {
 function renderParticipants() {
   const list = document.getElementById("participants-list");
   list.replaceChildren();
+  const visible = adminAuthenticated && adminRoom.role === "admin";
+  setParticipantsVisible(visible);
+  if (!visible) return;
   for (const person of adminRoom.participants || []) {
     const row = document.createElement("li");
     const label = document.createElement("span");

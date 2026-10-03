@@ -1,0 +1,18 @@
+{
+  "id": "/",
+  "name": "คิวเพลิน",
+  "short_name": "คิวเพลิน",
+  "description": "เลือกเพลง เข้าคิว และเปิดเพลงร่วมกันในงานของคุณ",
+  "lang": "th",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#211827",
+  "theme_color": "#211827",
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "/icons/qp-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/qp-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/qp-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

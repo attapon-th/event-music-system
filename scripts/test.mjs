@@ -4,6 +4,7 @@ import "./test-host.mjs";
 import "./test-sessions.mjs";
 import "./test-session-ui.mjs";
 import "./test-admin.mjs";
+import "./test-pwa.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, cpSync, symlinkSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -123,7 +124,7 @@ async function ready() {
   }
   throw new Error("Server failed to start: " + logs);
 }
-async function socket(token, options) {
+async function socket(token, options, authValues = {}) {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`, options);
   ws.messages = [];
   ws.on("message", (raw) => {
@@ -134,7 +135,7 @@ async function socket(token, options) {
   sockets.push(ws);
   await once(ws, "open");
   if (token) {
-    ws.send(JSON.stringify({ type: "auth", token }));
+    ws.send(JSON.stringify({ type: "auth", token, ...authValues }));
     await waitFor(() => ws.messages.some((msg) => msg.type === "auth" && msg.ok));
   }
   if (token) await waitFor(() => ws.snapshot);
@@ -156,7 +157,7 @@ async function request(videoId, clientId = videoId) {
   return res.json();
 }
 try {
-  start("test-password");
+  start("482691");
   await ready();
   for (const path of ["/", "/host.html", "/a", "/admin", "/admin.html", "/guest", "/g", "/explore"]) {
     assert.equal((await fetch(base + path)).status, 200, path);
@@ -172,9 +173,11 @@ try {
   }
   assert.equal((await fetch(base + "/api/host-token")).status, 404);
   assert.equal((await fetch(base + "/api/info")).status, 401);
-  assert.equal((await post("/api/sessions", { password: "wrong" })).status, 401);
-  const roomA = await (await post("/api/sessions", { password: "test-password" })).json();
-  const roomB = await (await post("/api/sessions", { password: "test-password" })).json();
+  const wrongPassword = await post("/api/sessions", { password: "9999" });
+  assert.equal(wrongPassword.status, 401);
+  assert.equal((await wrongPassword.json()).retryIn, 5);
+  const roomA = await (await post("/api/sessions", { password: "482691" })).json();
+  const roomB = await (await post("/api/sessions", { password: "482691" })).json();
   assert.match(roomA.code, /^[1-9][0-9]{2}$/);
   assert.notEqual(roomA.code, roomB.code);
   const joinMember = async (room, token) => (await post("/api/sessions/join", { code: room.code, sessionId: room.sessionId }, token)).json();
@@ -238,6 +241,7 @@ try {
   const otherPlayer = await socket(roomB.token);
   send(admin, "setParticipantRole", { id: loser.memberId, enabled: true });
   await waitFor(() => guest.messages.at(-1)?.role === "controller");
+  assert.equal("participants" in guest.messages.at(-1), false, "Controllers receive no participant roster");
   assert.equal(admin.messages.at(-1).participants.find(person => person.id === loser.memberId).role, "controller");
   assert.equal(JSON.stringify(admin.messages.at(-1).participants).includes(loser.token), false, "roster does not expose credentials");
   const errorsBefore = guest.messages.filter(m => m.type === "error").length;
@@ -258,8 +262,8 @@ try {
   assert.equal(otherRoom.messages.at(-1).role, "guest");
   const readOnly = loser;
   send(admin, "setVolume", { volume: 100 });
-  assert.equal((await post("/api/sessions/player", { code: roomA.code, password: "test-password" })).status, 404);
-  assert.equal((await post("/api/sessions/admin/recover", { password: "test-password" }, readOnly.token)).status, 404);
+  assert.equal((await post("/api/sessions/player", { code: roomA.code, password: "482691" })).status, 404);
+  assert.equal((await post("/api/sessions/admin/recover", { password: "482691" }, readOnly.token)).status, 404);
   send(admin, "setCooldown", { seconds: 0 });
   assert.equal((await request("song0000001")).ok, true);
   const requestInA = requestToken;
@@ -338,6 +342,44 @@ try {
   const oldTab = await socket(roomA.token);
   await waitFor(() => player.messages.some(msg => msg.code === "PLAYER_MOVED"));
   assert.deepEqual(oldTab.snapshot, admin.snapshot);
+  // A transport outage retains membership and room state. The Player consumes
+  // its cached running order, then authenticates with item IDs already finished.
+  const disconnected = structuredClone(admin.snapshot);
+  const completed = [disconnected.nowPlaying, disconnected.queue[0]].map((item, i) => ({
+    id: item.id, videoId: item.videoId, failed: i === 1,
+  }));
+  oldTab.terminate();
+  await once(oldTab, "close");
+  assert.equal((await request("resume00001")).ok, true, "Guests can add requests while Player is disconnected");
+  const resumed = await socket(roomA.token, undefined, { sessionId: roomA.sessionId, completed });
+  assert.equal(resumed.snapshot.nowPlaying.id, disconnected.queue[1].id);
+  assert.equal(resumed.snapshot.historyCount, disconnected.historyCount + 2);
+  assert.equal(resumed.snapshot.queue.at(-1).videoId, "resume00001", "Recovery retains new requests");
+  assert.ok(resumed.messages.filter(msg => msg.type === "state").every(msg => msg.state.nowPlaying.id === disconnected.queue[1].id),
+    "The reconnecting Player must never receive a snapshot that replays completed songs");
+  const afterRecovery = JSON.stringify(resumed.snapshot);
+  let received = resumed.messages.length;
+  send(resumed, "auth", { token: roomA.token, sessionId: roomA.sessionId, completed });
+  await waitFor(() => resumed.messages.length > received && resumed.messages.at(-1)?.type === "state");
+  assert.equal(JSON.stringify(resumed.snapshot), afterRecovery, "Replaying offline progress cannot advance twice");
+  const reconnectMember = await joinMember(roomA, adminToken);
+  assert.equal(reconnectMember.memberId, winner.memberId);
+  assert.equal(reconnectMember.token, adminToken);
+  assert.equal(reconnectMember.role, "admin", "Room re-entry preserves Admin authority");
+  const readOnlyReconnect = await socket(loser.token, undefined, {
+    sessionId: roomA.sessionId, completed: [{ id: resumed.snapshot.nowPlaying.id, videoId: resumed.snapshot.nowPlaying.videoId, failed: false }],
+  });
+  assert.equal(JSON.stringify(readOnlyReconnect.snapshot), afterRecovery, "Guests cannot replay Player completion reports");
+  const playedAgain = await request(completed[0].videoId);
+  assert.equal(playedAgain.ok, true);
+  await waitFor(() => resumed.snapshot.queue.some(item => item.id === playedAgain.id));
+  send(admin, "playNow", { id: playedAgain.id });
+  await waitFor(() => resumed.snapshot.nowPlaying.id === playedAgain.id);
+  received = resumed.messages.length;
+  send(resumed, "auth", { token: roomA.token, sessionId: roomA.sessionId,
+    completed: [...completed, null, { id: playedAgain.id, videoId: completed[0].videoId, failed: "false" }] });
+  await waitFor(() => resumed.messages.length > received && resumed.messages.at(-1)?.type === "state");
+  assert.equal(resumed.snapshot.nowPlaying.id, playedAgain.id, "Old/malformed progress cannot skip a later request for the same video");
   assert.equal((await post("/api/sessions/close", {}, readOnly.token)).status, 403);
   const autoErrors = otherRoom.messages.filter(msg => msg.type === "error").length;
   send(otherRoom, "setAutoQueue", { enabled: true });
@@ -387,11 +429,15 @@ try {
   for (let i = 0; i < 10; i++) {
     assert.equal((await post("/api/sessions/join", { code: "12" }, undefined, { "X-Forwarded-For": "192.0.2.50" })).status, 400);
   }
-  assert.equal((await post("/api/sessions/join", { code: roomA.code }, undefined, { "X-Forwarded-For": "192.0.2.50" })).status, 429);
+  const blockedAdmission = await post("/api/sessions/join", { code: roomA.code }, undefined, { "X-Forwarded-For": "192.0.2.50" });
+  assert.equal(blockedAdmission.status, 429);
+  const admissionRetry = (await blockedAdmission.json()).retryIn;
+  assert.ok(admissionRetry > 0 && admissionRetry <= 60);
+  assert.equal(blockedAdmission.headers.get("retry-after"), String(admissionRetry));
   assert.equal((await post("/api/sessions/join", { code: roomA.code })).status, 200);
   assert.equal((await post("/api/sessions/join", { code: roomA.code, sessionId: roomB.sessionId })).status, 410);
   assert.equal((await post("/api/sessions", { password: {} })).status, 401);
-  const idleRoom = await (await post("/api/sessions", { password: "test-password" })).json();
+  const idleRoom = await (await post("/api/sessions", { password: "482691" })).json();
   const silent = await socket(idleRoom.token, { autoPong: false });
   await waitFor(() => silent.readyState === WebSocket.CLOSED);
   // A dead connection must not pin a room in memory.
@@ -400,7 +446,7 @@ try {
   assert.equal((await post("/api/sessions/join", { code: idleRoom.code, sessionId: idleRoom.sessionId })).status, 410);
   assert.equal((await fetch(base + "/api/info", { headers: auth(adminToken) })).status, 200, "live room survives clock advance");
   // A pending song request cannot resurrect a room after its idle deadline.
-  const pendingRoom = await (await post("/api/sessions", { password: "test-password" })).json();
+  const pendingRoom = await (await post("/api/sessions", { password: "482691" })).json();
   const pendingRequest = post("/api/request", { videoId: "slow0000001", title: "Slow song" }, pendingRoom.token);
   await waitFor(() => existsSync(join(temp, "request-started")));
   writeFileSync(join(temp, "clock-offset"), String(7200002));
@@ -415,23 +461,40 @@ try {
   for (const ws of sockets) ws.terminate();
   child.kill();
   await once(child, "exit");
-  start("test-password");
+  start("482691");
   await ready();
   assert.equal((await post("/api/sessions/join", { code: roomA.code, sessionId: roomA.sessionId })).status, 410);
   assert.equal((await fetch(base + "/api/info", { headers: auth(adminToken) })).status, 401);
+  const lostAfterRestart = await socket();
+  send(lostAfterRestart, "auth", { token: roomA.token, sessionId: roomA.sessionId, completed });
+  await waitFor(() => lostAfterRestart.messages.some(msg => msg.type === "auth" && !msg.ok));
+  assert.equal(lostAfterRestart.snapshot, undefined, "Restarted server cannot restore an in-memory room");
   assert.equal((await fetch(base + "/admin")).status, 200);
   child.kill();
   await once(child, "exit");
-  start("");
-  await ready();
-  for (const path of ["/api/sessions"]) {
-    assert.equal((await post(path, { code: roomA.code, password: "test-password" })).status, 503);
+  for (const password of ["", "1", "12", "123", "abcd", "12a4", "๑๒๓๔", "１２３４", "1234 5", " 1234", "1234 ", "1234\n", "12.34", "+1234", "-1234", "1e04", "😀😀😀😀"]) {
+    const logStart = logs.length;
+    start(password);
+    const [exitCode] = await once(child, "exit");
+    assert.equal(exitCode, 1, "Creation passwords must contain only ASCII digits and have at least four digits");
+    const output = logs.slice(logStart);
+    assert.match(output, /HOST_PASSWORD.*4/);
+    assert.match(output, /ตัวเลข 0–9/);
+    if (password) assert.equal(output.includes(password), false, "Startup errors never print the configured secret");
+    await assert.rejects(fetch(base + "/guest"), "Invalid startup must not open the HTTP port");
   }
-  const noPasswordGuest = await socket();
-  send(noPasswordGuest, "auth", { token: "" });
-  await waitFor(() => noPasswordGuest.messages.some((msg) => msg.type === "auth" && !msg.ok));
-  send(noPasswordGuest, "skip");
-  await waitFor(() => noPasswordGuest.messages.some((msg) => msg.type === "error"));
+  for (const password of ["1234", "001234", "0".repeat(128)]) {
+    start(password);
+    await ready();
+    assert.equal((await post("/api/sessions", { password })).status, 200, "Digit strings of at least four digits support startup and creation");
+    assert.equal((await post("/api/sessions", { password: Number(password) })).status, 401, "Credentials remain strings");
+    if (password.startsWith("0")) {
+      assert.equal((await post("/api/sessions", { password: String(Number(password)) })).status, 401, "Leading zeros are significant");
+    }
+    child.kill();
+    await once(child, "exit");
+    child = null;
+  }
   // State edge cases: stale completion after idle, invalid volume, empty permutations.
   const state = new JukeboxState();
   assert.equal(state.snapshot().volume, 60, "new rooms start at 60% volume");

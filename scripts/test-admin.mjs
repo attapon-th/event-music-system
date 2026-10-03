@@ -24,6 +24,7 @@ const context = createContext({
   document: { getElementById: node, createElement: () => element(), querySelectorAll: () => [], querySelector: () => element() },
   Room: { code: "123", ready: Promise.resolve(true), connect(value) { handlers = value; }, send: value => sent.push(JSON.parse(JSON.stringify(value))) },
   renderQueue() {}, NO_THUMB: "", confirm: () => true,
+  setParticipantsVisible(visible) { node("participants-tab").hidden = !visible; if (!visible) node("participants-panel").hidden = true; },
 });
 const source = ["i18n.js", "admin.js"].map(file => readFileSync(new URL(`../public/${file}`, import.meta.url), "utf8")).join("\n");
 runInContext(source, context);
@@ -41,6 +42,7 @@ handlers.onState({ state, code: "123", memberId: "owner", primaryAdminId: "owner
 assert.equal(node("admin-title").textContent, "ผู้ดูแลเพลง · ห้อง 123");
 const list = node("participants-list");
 assert.equal(list.children.length, 4, "roster includes online and offline members");
+assert.equal(node("participants-tab").hidden, false);
 assert.equal(list.children[0].children.length, 1, "Player rights cannot be assigned");
 assert.equal(list.children[1].children.length, 1, "primary Admin cannot revoke their own role");
 assert.match(list.children[2].children[0].textContent, /ผู้ฟัง.*ออฟไลน์/);
@@ -65,7 +67,9 @@ node("admin-cooldown").onclick();
 assert.deepEqual(sent.at(-1), { type: "setCooldown", seconds: 30 });
 handlers.onState({ state, code: "123", memberId: "helper", primaryAdminId: "owner", role: "controller", participants,
   filterOn: true, moderationMode: "default", cooldownSeconds: 30 });
-assert.ok(list.children.every(row => row.children.length === 1), "Controller has no grant/revoke UI");
+assert.equal(list.children.length, 0, "Controller has no participant list");
+assert.equal(node("participants-tab").hidden, true);
+assert.equal(node("participants-panel").hidden, true);
 assert.equal(node("admin-cooldown-label").textContent, "เวลารอ: 30 วินาที", "button label follows the authoritative room snapshot");
 handlers.onState({ state, code: "123", memberId: "helper", primaryAdminId: "owner", role: "controller", participants,
   cooldownSeconds: 60 });
