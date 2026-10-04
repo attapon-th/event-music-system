@@ -85,6 +85,7 @@ for (const earlyReady of [false, true]) {
     send(message) { if (!this.connected) return false; messages.push(message); return true; },
     finish(message) { this.token = null; context.roomFinished = message; context.stopLocalPlayer(); },
     connect(handlers) {
+      this.leave = () => { this.token = null; this.connected = false; handlers.onEnd(); };
       return {
         authData: () => handlers.authData?.(),
         onauth() { context.Room.connected = true; handlers.onAuth?.(); },
@@ -131,7 +132,7 @@ for (const earlyReady of [false, true]) {
   };
   assert.equal(document.activeElement.id, "playpause", "Player opens without a start screen");
   runInContext(`ws.onmessage({ data: JSON.stringify({ type: "state", state: {
-    nowPlaying: { videoId: "song0000001", title: "Test", channel: "Artist" },
+    nowPlaying: { id: "song-1", videoId: "song0000001", title: "Test", channel: "Artist" },
     queue: [], paused: false, volume: 37, autoQueue: true
   } }) });`, context);
   assert.equal(document.activeElement.id, "playpause");
@@ -275,6 +276,20 @@ for (const earlyReady of [false, true]) {
     nowPlaying: ${JSON.stringify(nowPlaying)}, queue: ${JSON.stringify(queue)}, paused: false, volume: 37
   } }) });`, context);
   const track = n => ({ id: `offline-${n}`, videoId: `offline000${n}`, title: `Offline ${n}`, channel: "Artist" });
+  const repeatedVideo = { id: "repeat-1", videoId: "repeat00001", title: "Repeated video" };
+  snapshot(repeatedVideo);
+  state = 0;
+  playerEvents.onStateChange({ data: 0 });
+  assert.equal(messages.at(-1).type, "ended");
+  assert.equal(messages.at(-1).id, repeatedVideo.id);
+  assert.equal(messages.at(-1).videoId, repeatedVideo.videoId);
+  const repeatLoads = calls.filter(([action]) => action === "load").length;
+  snapshot({ ...repeatedVideo, id: "repeat-2" });
+  assert.equal(calls.filter(([action]) => action === "load").length, repeatLoads + 1, "A new queue item reloads even when its video ID is unchanged");
+  playerEvents.onError({ data: 100 });
+  assert.equal(messages.at(-1).type, "error");
+  assert.equal(messages.at(-1).id, "repeat-2");
+  assert.equal(messages.at(-1).videoId, repeatedVideo.videoId);
   snapshot(track(1), [track(2), track(3)]);
   runInContext("ws.onclose();", context);
   const finishSong = () => { state = 0; playerEvents.onStateChange({ data: 0 }); };
@@ -322,15 +337,22 @@ for (const earlyReady of [false, true]) {
   runInContext("ws.onauth();", context);
   snapshot(track(8));
   assert.equal(calls.filter(([action]) => action === "load").length, loadsDuringAuth);
+  const beforeLeave = messages.length;
+  document.getElementById("exit-room").click();
+  assert.equal(state, -1, "Player exit stops local audio");
+  assert.equal(context.Room.connected, false);
+  assert.equal(messages.length, beforeLeave, "Player exit does not send room controls");
+  context.Room.token = "test-token";
+  runInContext("ws.onauth();", context);
   snapshot(track(6));
   await fullscreen.click();
   context.Room.token = null;
   runInContext('ws.onmessage({data: JSON.stringify({type: "sessionEnded"})})', context);
-  context.history.replaceState(null, "", "/"); // Room.close resets the entry URL before the deferred exit.
+  context.history.replaceState(null, "", "/"); // Room end resets the entry URL before the deferred exit.
   await settleFullscreen();
   assert.equal(state, -1, "Revoked Player stops audio");
   assert.equal(wrap.classList.contains("video-fullscreen"), false, "Ended room exits fullscreen");
   assert.equal(historyIndex, 1);
   assert.equal(context.history.url, "/", "Room closure does not restore an obsolete room URL");
 }
-console.log("PASS: Host playback load orders, remote focus/OK/media keys, native/fallback fullscreen. YouTube and browser simulated.");
+console.log("PASS: Host load orders, completion item IDs/repeated videos/local exit, remote focus/OK/media keys, native/fallback fullscreen. YouTube and browser simulated.");

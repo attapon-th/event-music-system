@@ -9,7 +9,7 @@
 //   3. state.add()      — enqueue; broadcast to all clients over WebSocket
 
 import { readFileSync, existsSync } from "node:fs";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import http from "node:http";
@@ -39,12 +39,6 @@ const DEFAULT_REGION = /^[A-Za-z]{2}$/.test(process.env.DEFAULT_REGION || "") ? 
 const DEFAULT_LOCALE = process.env.DEFAULT_LOCALE || "th-TH";
 const youtubeOptions = { region: DEFAULT_REGION, locale: DEFAULT_LOCALE };
 
-const HOST_PASSWORD = process.env.HOST_PASSWORD || "";
-if (HOST_PASSWORD.length < 4 || /[^0-9]/.test(HOST_PASSWORD)) {
-  console.error("HOST_PASSWORD ต้องเป็นตัวเลข 0–9 อย่างน้อย 4 หลัก จึงจะเริ่ม server ได้");
-  process.exit(1);
-}
-
 const PORT = parseInt(process.env.PORT || "45416", 10);
 const LAN_IP = detectLanIp(process.env.HOST_IP);
 // PUBLIC_URL (e.g. https://grad-din-music.hangton.net) takes precedence when the
@@ -63,9 +57,8 @@ const app = express();
 app.set("trust proxy", true); // behind a reverse proxy — req.ip should read X-Forwarded-For
 app.use(express.json());
 
-// The creation password authorizes new rooms only.
+// Room admission failures share the existing retry limit.
 const failedAttempts = new Map();
-const hash = (value) => createHash("sha256").update(value).digest();
 function tokenFrom(req) {
   return (req.headers.authorization || "").match(/^Bearer ([A-Za-z0-9-]+)$/)?.[1];
 }
@@ -86,11 +79,14 @@ function checkAttempts(req, res, next) {
   }
   next();
 }
-function requirePassword(req, res, next) {
-  const password = req.body?.password;
-  if (typeof password !== "string" || !timingSafeEqual(hash(password), hash(HOST_PASSWORD))) {
+function requirePlayerCode(req, res, next) {
+  const code = req.body?.code;
+  const roomCode = typeof code === "string" ? code.slice(0, 3) : "";
+  const sum = [...roomCode].reduce((total, digit) => total + Number(digit), 0);
+  if (!/^[1-9][0-9]{2}$/.test(roomCode) || code !== roomCode + sum) {
     return fail(req, res, 401, "รหัสสร้างไม่ถูกต้อง");
   }
+  req.roomCode = roomCode;
   next();
 }
 function findRoom(req, res, next) {
@@ -111,8 +107,8 @@ function requireMember(req, res, next) {
 function memberInfo(member) {
   return { code: member.room.code, sessionId: member.room.id, token: member.token, role: member.role, memberId: member.id };
 }
-app.post("/api/sessions", checkAttempts, requirePassword, (_req, res) => {
-  const room = sessions.create();
+app.post("/api/sessions", checkAttempts, requirePlayerCode, (req, res) => {
+  const room = sessions.create(req.roomCode);
   if (!room) return res.status(409).json({ error: "ห้องเต็ม กรุณาลองใหม่ภายหลัง" });
   room.onMembersChange = () => broadcastState(room);
   room.state.onChange = () => {
@@ -297,7 +293,7 @@ function stateMessage(room, member) {
     filterOn: room.filterOn, moderationMode: room.moderationMode,
     cooldownSeconds: room.cooldownSeconds, eventContext: room.eventContext,
     primaryAdminId: room.primaryAdminId, memberId: member.id, role: member.role,
-    ...(member.role === "admin" ? { participants: [...room.members.values()].map(person => ({
+    ...(["admin", "controller"].includes(member.role) ? { participants: [...room.members.values()].map(person => ({
       id: person.id, name: person.name, role: person.role, online: online.has(person.id),
     })) } : {}),
   });
@@ -326,16 +322,6 @@ wss.on("connection", (ws) => {
         ws.send(JSON.stringify({ type: "auth", ok: false, error: "ห้องหมดอายุหรือไม่มีสิทธิ์เข้าห้อง" }));
         return;
       }
-      // A second tab on the same Player must not become a second audio source.
-      if (member.role === "player") {
-        for (const other of [...member.room.clients]) {
-          if (other.member?.token === member.token) {
-            other.send(JSON.stringify({ type: "sessionEnded", code: "PLAYER_MOVED", error: "เปิด Player ในหน้าใหม่แล้ว" }));
-            sessions.detach(other);
-            other.close(4001, "Player replaced");
-          }
-        }
-      }
       if (member.role !== "player" && typeof msg.name === "string" && msg.name.trim()) member.name = msg.name.trim().slice(0, 40);
       // Reconcile tracks consumed from the Player's last snapshot while offline.
       // Item IDs prevent replay from skipping a later request for the same video.
@@ -357,7 +343,7 @@ wss.on("connection", (ws) => {
     if (!member || member !== ws.member || member.role === "guest" ||
         (["ended", "error"].includes(msg.type) && member.role !== "player") ||
         (["setParticipantRole", "setFilter", "setCooldown"].includes(msg.type) &&
-          (msg.type === "setParticipantRole" ? member.role !== "admin" : !["admin", "controller"].includes(member.role)))) {
+          !["admin", "controller"].includes(member.role))) {
       ws.send(JSON.stringify({ type: "error", error: "ไม่มีสิทธิ์ควบคุมเพลง" }));
       return;
     }
@@ -366,7 +352,10 @@ wss.on("connection", (ws) => {
     switch (msg.type) {
       case "ended": // host player finished a track
       case "error": // host player couldn't play (embed-disabled/region-locked)
-        if (typeof msg.videoId === "string") state.advance(msg.videoId, msg.type === "error");
+        if (typeof msg.id === "string" && typeof msg.videoId === "string" &&
+            state.nowPlaying?.id === msg.id && state.nowPlaying.videoId === msg.videoId) {
+          state.advance(msg.videoId, msg.type === "error");
+        }
         break;
       case "skip":
         state.skip();
@@ -401,7 +390,9 @@ wss.on("connection", (ws) => {
         break;
       case "setParticipantRole": {
         const target = room.members.get(msg.id);
-        if (typeof msg.enabled !== "boolean" || !target || target.role === "player" || target.id === room.primaryAdminId) {
+        if (typeof msg.enabled !== "boolean" || !target || ["admin", "player"].includes(target.role) ||
+            target.id === room.primaryAdminId || (member.role === "controller" &&
+              (msg.enabled !== true || target.role !== "guest"))) {
           ws.send(JSON.stringify({ type: "error", error: "ไม่สามารถเปลี่ยนสิทธิ์ผู้เข้าร่วมนี้ได้" }));
           break;
         }

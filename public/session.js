@@ -45,15 +45,16 @@ const Room = (() => {
   document.body.dataset.roomActive = "false";
   node("room-code").value = params.get("room") || "";
   const key = (id, player) => `music-session:${id}:${player ? "player" : "member"}`;
+  const credentialStorage = (player) => player ? sessionStorage : localStorage;
   function saved(code, id, player) {
     const knownId = id || localStorage.getItem(`music-room:${code}`);
-    return knownId ? localStorage.getItem(key(knownId, player)) : null;
+    return knownId ? credentialStorage(player).getItem(key(knownId, player)) : null;
   }
   function remember(member) {
     current = member;
     clearTimeout(retry);
     stopped = false;
-    localStorage.setItem(key(member.sessionId, member.role === "player"), member.token);
+    credentialStorage(member.role === "player").setItem(key(member.sessionId, member.role === "player"), member.token);
     localStorage.setItem(`music-room:${member.code}`, member.sessionId);
   }
   function url(target) {
@@ -62,6 +63,7 @@ const Room = (() => {
   const privileged = () => ["admin", "controller"].includes(current?.role);
   function routeForRole() {
     if ((screen === "guest" && privileged()) || (screen === "admin" && !privileged())) {
+      handlers?.onEnd?.();
       location.replace(url(privileged() ? "admin" : "guest"));
       return false;
     }
@@ -79,8 +81,8 @@ const Room = (() => {
     stopped = true;
     authenticated = false;
     clearTimeout(retry);
-    if (current && forget && localStorage.getItem(key(current.sessionId, current.role === "player")) === current.token) {
-      localStorage.removeItem(key(current.sessionId, current.role === "player"));
+    if (current && forget && credentialStorage(current.role === "player").getItem(key(current.sessionId, current.role === "player")) === current.token) {
+      credentialStorage(current.role === "player").removeItem(key(current.sessionId, current.role === "player"));
     }
     current = null;
     handlers?.onEnd?.();
@@ -145,7 +147,7 @@ const Room = (() => {
         return;
       }
       if (msg.type === "sessionEnded") {
-        end(msg.error || t("roomUnavailable"), msg.code !== "PLAYER_MOVED");
+        end(msg.error || t("roomUnavailable"));
         return;
       }
       if (msg.type === "auth") {
@@ -199,14 +201,13 @@ const Room = (() => {
     };
   }
   submit(node("room-create"), async () => {
-    const credential = node("entry-code").value;
-    const code = credential.trim();
+    const code = node("entry-code").value.trim();
     if (/^[1-9][0-9]{2}$/.test(code)) {
       remember(await post("/api/sessions/join", { code }, saved(code, null, false)));
       location.replace(url(privileged() ? "admin" : "guest"));
       return;
     }
-    remember(await post("/api/sessions", { password: credential }));
+    remember(await post("/api/sessions", { code }));
     node("entry-code").value = "";
     applyState({ role: "player" });
     history.replaceState(null, "", url("player"));
@@ -241,7 +242,7 @@ const Room = (() => {
     }
   }
   return { ready: init(), fetch: api, connect, send, finish: end,
-    async close() { if (!stopped) await post("/api/sessions/close", {}); end("", true); },
+    leave() { end("", true); },
     get connected() { return authenticated && socket?.readyState === WebSocket.OPEN; },
     get sessionId() { return current?.sessionId; },
     get token() { return current?.token; }, get code() { return current?.code; } };

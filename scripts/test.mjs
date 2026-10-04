@@ -157,7 +157,7 @@ async function request(videoId, clientId = videoId) {
   return res.json();
 }
 try {
-  start("482691");
+  start();
   await ready();
   for (const path of ["/", "/host.html", "/a", "/admin", "/admin.html", "/guest", "/g", "/explore"]) {
     assert.equal((await fetch(base + path)).status, 200, path);
@@ -173,11 +173,17 @@ try {
   }
   assert.equal((await fetch(base + "/api/host-token")).status, 404);
   assert.equal((await fetch(base + "/api/info")).status, 401);
-  const wrongPassword = await post("/api/sessions", { password: "9999" });
-  assert.equal(wrongPassword.status, 401);
-  assert.equal((await wrongPassword.json()).retryIn, 5);
-  const roomA = await (await post("/api/sessions", { password: "482691" })).json();
-  const roomB = await (await post("/api/sessions", { password: "482691" })).json();
+  const wrongCode = await post("/api/sessions", { code: "1237" });
+  assert.equal(wrongCode.status, 401);
+  assert.equal((await wrongCode.json()).retryIn, 5);
+  const createResponses = await Promise.all([post("/api/sessions", { code: "1236" }), post("/api/sessions", { code: "1236" })]);
+  const [roomA, secondPlayerInfo] = await Promise.all(createResponses.map(response => response.json()));
+  assert.equal(roomA.code, "123");
+  assert.equal(roomA.sessionId, secondPlayerInfo.sessionId, "concurrent creation enters one room");
+  assert.notEqual(roomA.token, secondPlayerInfo.token, "each Player entry issues its own credential");
+  assert.equal(secondPlayerInfo.role, "player");
+  const roomB = await (await post("/api/sessions", { code: "78924" })).json();
+  assert.equal(roomB.code, "789");
   assert.match(roomA.code, /^[1-9][0-9]{2}$/);
   assert.notEqual(roomA.code, roomB.code);
   const joinMember = async (room, token) => (await post("/api/sessions/join", { code: room.code, sessionId: room.sessionId }, token)).json();
@@ -254,12 +260,28 @@ try {
   await waitFor(() => !otherPlayer.snapshot.autoQueue && !otherRoom.snapshot.autoQueue);
   send(admin, "setParticipantRole", { id: loser.memberId, enabled: true });
   await waitFor(() => guest.messages.at(-1)?.role === "controller");
-  assert.equal("participants" in guest.messages.at(-1), false, "Controllers receive no participant roster");
+  assert.ok(Array.isArray(guest.messages.at(-1).participants), "Controllers receive the participant roster");
   assert.equal(admin.messages.at(-1).participants.find(person => person.id === loser.memberId).role, "controller");
   assert.equal(JSON.stringify(admin.messages.at(-1).participants).includes(loser.token), false, "roster does not expose credentials");
+  const delegate = await joinMember(roomA);
+  const delegated = await socket(delegate.token);
+  send(guest, "setParticipantRole", { id: delegate.memberId, enabled: true });
+  await waitFor(() => delegated.messages.at(-1)?.role === "controller");
+  assert.equal(admin.messages.at(-1).participants.find(person => person.id === delegate.memberId).role, "controller");
+  assert.equal(JSON.stringify(guest.messages.at(-1).participants).includes(delegate.token), false);
   const errorsBefore = guest.messages.filter(m => m.type === "error").length;
   send(guest, "setParticipantRole", { id: winner.memberId, enabled: false });
-  await waitFor(() => guest.messages.filter(m => m.type === "error").length > errorsBefore);
+  send(guest, "setParticipantRole", { id: delegate.memberId, enabled: false });
+  send(guest, "setParticipantRole", { id: loser.memberId, enabled: false });
+  send(guest, "setParticipantRole", { id: delegate.memberId, enabled: true });
+  send(guest, "setParticipantRole", { id: roomA.memberId, enabled: true });
+  send(guest, "setParticipantRole", { id: memberB.memberId, enabled: true });
+  await waitFor(() => guest.messages.filter(m => m.type === "error").length >= errorsBefore + 6);
+  assert.equal(delegated.messages.at(-1).role, "controller");
+  assert.equal(admin.messages.at(-1).role, "admin");
+  assert.equal(player.messages.at(-1).role, "player");
+  send(admin, "setParticipantRole", { id: delegate.memberId, enabled: false });
+  await waitFor(() => delegated.messages.at(-1)?.role === "guest");
   send(guest, "setVolume", { volume: 29 });
   await waitFor(() => admin.snapshot.volume === 29);
   send(guest, "setAutoQueue", { enabled: false });
@@ -326,10 +348,11 @@ try {
   send(admin, "setEventContext", { context: { toString: 1 } });
   send(admin, "setCooldown", { seconds: { toString: 1 } });
   send(admin, "setFilter", { on: "false" });
-  for (const type of ["reorder", "remove", "clear", "playNow", "skip", "pause", "setVolume", "ended"]) {
+  const readOnlyErrors = guest.messages.filter(m => m.type === "error").length;
+  for (const type of ["reorder", "remove", "clear", "playNow", "skip", "pause", "setVolume", "ended", "setParticipantRole"]) {
     send(guest, type, { ids: [], id: admin.snapshot.queue[0].id, volume: 0, videoId: admin.snapshot.nowPlaying.videoId });
   }
-  await waitFor(() => guest.messages.filter((m) => m.type === "error").length >= errorsBefore + 9);
+  await waitFor(() => guest.messages.filter((m) => m.type === "error").length >= readOnlyErrors + 9);
   assert.equal(JSON.stringify(admin.snapshot), before);
   send(unauthenticated, "auth", { token: "invalid" });
   await waitFor(() => unauthenticated.messages.some((m) => m.type === "auth" && !m.ok));
@@ -355,7 +378,14 @@ try {
   assert.equal((await request(videos[2].videoId)).ok, true, "long videos still enqueue after an attempted AI enable");
   await sync((s) => s.queue.some((item) => item.videoId === videos[2].videoId));
   const oldTab = await socket(roomA.token);
-  await waitFor(() => player.messages.some(msg => msg.code === "PLAYER_MOVED"));
+  assert.equal(player.readyState, WebSocket.OPEN, "Another tab with the same token does not replace Player");
+  assert.equal(player.messages.some(msg => msg.code === "PLAYER_MOVED"), false);
+  const secondPlayer = await socket(secondPlayerInfo.token);
+  assert.equal(player.readyState, WebSocket.OPEN);
+  assert.deepEqual(secondPlayer.snapshot, admin.snapshot);
+  secondPlayer.close();
+  await once(secondPlayer, "close");
+  assert.equal((await fetch(base + "/api/info", { headers: auth(roomA.token) })).status, 200, "Leaving a Player connection retains the room");
   assert.deepEqual(oldTab.snapshot, admin.snapshot);
   // A transport outage retains membership and room state. The Player consumes
   // its cached running order, then authenticates with item IDs already finished.
@@ -395,6 +425,24 @@ try {
     completed: [...completed, null, { id: playedAgain.id, videoId: completed[0].videoId, failed: "false" }] });
   await waitFor(() => resumed.messages.length > received && resumed.messages.at(-1)?.type === "state");
   assert.equal(resumed.snapshot.nowPlaying.id, playedAgain.id, "Old/malformed progress cannot skip a later request for the same video");
+  // Old live reports cannot skip a later request of the same YouTube video.
+  send(resumed, "ended", { id: completed[0].id, videoId: completed[0].videoId });
+  send(resumed, "error", { id: completed[0].id, videoId: completed[0].videoId });
+  send(resumed, "ended", { videoId: completed[0].videoId });
+  send(resumed, "error", { id: playedAgain.id, videoId: "wrong-video" });
+  send(resumed, "setVolume", { volume: 38 });
+  await waitFor(() => resumed.snapshot.volume === 38);
+  assert.equal(resumed.snapshot.nowPlaying.id, playedAgain.id);
+  const finishing = resumed.snapshot.nowPlaying;
+  const nextId = resumed.snapshot.queue[0].id;
+  const historyBeforeFinish = resumed.snapshot.historyCount;
+  send(resumed, "ended", { id: finishing.id, videoId: finishing.videoId });
+  send(player, "ended", { id: finishing.id, videoId: finishing.videoId });
+  send(player, "error", { id: finishing.id, videoId: finishing.videoId });
+  send(player, "setVolume", { volume: 39 });
+  await waitFor(() => player.snapshot.volume === 39 && resumed.snapshot.volume === 39);
+  assert.equal(resumed.snapshot.nowPlaying.id, nextId, "Multiple Players advance exactly once");
+  assert.equal(resumed.snapshot.historyCount, historyBeforeFinish + 1);
   assert.equal((await post("/api/sessions/close", {}, readOnly.token)).status, 403);
   const autoErrors = otherRoom.messages.filter(msg => msg.type === "error").length;
   send(otherRoom, "setAutoQueue", { enabled: true });
@@ -410,10 +458,11 @@ try {
   const autoRefresh = await socket(memberB.token);
   assert.equal(autoRefresh.snapshot.autoQueue, true, "refresh gets the authoritative toggle");
   assert.equal(autoRefresh.snapshot.queue.length, 0, "prefetch does not add to the main queue");
-  send(otherPlayer, "ended", { videoId: "song0000001" });
+  const initialOtherTrack = { ...otherPlayer.snapshot.nowPlaying };
+  send(otherPlayer, "ended", { id: initialOtherTrack.id, videoId: "song0000001" });
   await waitFor(() => otherRoom.snapshot.nowPlaying?.videoId === "auto0000001" && otherRoom.snapshot.autoQueueStatus === "ready");
   assert.equal(otherRoom.snapshot.nowPlaying.autoQueued, true);
-  send(otherPlayer, "ended", { videoId: "song0000001" });
+  send(otherPlayer, "ended", { id: initialOtherTrack.id, videoId: "song0000001" });
   send(otherPlayer, "setAutoQueue", { enabled: false });
   await waitFor(() => !otherRoom.snapshot.autoQueue);
   assert.equal(otherRoom.snapshot.nowPlaying.videoId, "auto0000001", "disable/stale ended preserves the current song");
@@ -424,9 +473,9 @@ try {
   requestToken = requestInA;
   await waitFor(() => otherRoom.snapshot.queue.length === 1);
   assert.equal(otherRoom.snapshot.nowPlaying.videoId, "auto0000001");
-  send(otherPlayer, "ended", { videoId: "auto0000001" });
+  send(otherPlayer, "ended", { id: otherPlayer.snapshot.nowPlaying.id, videoId: "auto0000001" });
   await waitFor(() => otherRoom.snapshot.nowPlaying?.videoId === "main0000001" && otherRoom.snapshot.autoQueueStatus === "ready");
-  send(otherPlayer, "ended", { videoId: "main0000001" });
+  send(otherPlayer, "ended", { id: otherPlayer.snapshot.nowPlaying.id, videoId: "main0000001" });
   await waitFor(() => otherRoom.snapshot.nowPlaying?.videoId === "auto0000002");
   // Close the room with a recommendation response in flight; no late reply can recreate it.
   assert.equal((await post("/api/request", { videoId: "wait0000001", title: "Pending recommendations", clientId: "recommendations-close" }, memberB.token)).status, 200);
@@ -452,7 +501,7 @@ try {
   assert.equal((await post("/api/sessions/join", { code: roomA.code })).status, 200);
   assert.equal((await post("/api/sessions/join", { code: roomA.code, sessionId: roomB.sessionId })).status, 410);
   assert.equal((await post("/api/sessions", { password: {} })).status, 401);
-  const idleRoom = await (await post("/api/sessions", { password: "482691" })).json();
+  const idleRoom = await (await post("/api/sessions", { code: "1001" })).json();
   const silent = await socket(idleRoom.token, { autoPong: false });
   await waitFor(() => silent.readyState === WebSocket.CLOSED);
   // A dead connection must not pin a room in memory.
@@ -461,7 +510,7 @@ try {
   assert.equal((await post("/api/sessions/join", { code: idleRoom.code, sessionId: idleRoom.sessionId })).status, 410);
   assert.equal((await fetch(base + "/api/info", { headers: auth(adminToken) })).status, 200, "live room survives clock advance");
   // A pending song request cannot resurrect a room after its idle deadline.
-  const pendingRoom = await (await post("/api/sessions", { password: "482691" })).json();
+  const pendingRoom = await (await post("/api/sessions", { code: "99927" })).json();
   const pendingRequest = post("/api/request", { videoId: "slow0000001", title: "Slow song" }, pendingRoom.token);
   await waitFor(() => existsSync(join(temp, "request-started")));
   writeFileSync(join(temp, "clock-offset"), String(7200002));
@@ -476,7 +525,7 @@ try {
   for (const ws of sockets) ws.terminate();
   child.kill();
   await once(child, "exit");
-  start("482691");
+  start();
   await ready();
   assert.equal((await post("/api/sessions/join", { code: roomA.code, sessionId: roomA.sessionId })).status, 410);
   assert.equal((await fetch(base + "/api/info", { headers: auth(adminToken) })).status, 401);
@@ -487,24 +536,16 @@ try {
   assert.equal((await fetch(base + "/admin")).status, 200);
   child.kill();
   await once(child, "exit");
-  for (const password of ["", "1", "12", "123", "abcd", "12a4", "๑๒๓๔", "１２３４", "1234 5", " 1234", "1234 ", "1234\n", "12.34", "+1234", "-1234", "1e04", "😀😀😀😀"]) {
-    const logStart = logs.length;
-    start(password);
-    const [exitCode] = await once(child, "exit");
-    assert.equal(exitCode, 1, "Creation passwords must contain only ASCII digits and have at least four digits");
-    const output = logs.slice(logStart);
-    assert.match(output, /HOST_PASSWORD.*4/);
-    assert.match(output, /ตัวเลข 0–9/);
-    if (password) assert.equal(output.includes(password), false, "Startup errors never print the configured secret");
-    await assert.rejects(fetch(base + "/guest"), "Invalid startup must not open the HTTP port");
-  }
-  for (const password of ["1234", "001234", "0".repeat(128)]) {
-    start(password);
+  for (const legacyPassword of [undefined, "abcd", "482691"]) {
+    start(legacyPassword);
     await ready();
-    assert.equal((await post("/api/sessions", { password })).status, 200, "Digit strings of at least four digits support startup and creation");
-    assert.equal((await post("/api/sessions", { password: Number(password) })).status, 401, "Credentials remain strings");
-    if (password.startsWith("0")) {
-      assert.equal((await post("/api/sessions", { password: String(Number(password)) })).status, 401, "Leading zeros are significant");
+    for (const code of ["1001", "1236", "78924", "99927"]) {
+      assert.equal((await post("/api/sessions", { code })).status, 200, "Creation uses the room checksum regardless of legacy HOST_PASSWORD");
+    }
+    assert.equal((await post("/api/sessions", { password: legacyPassword })).status, 401, "Legacy password requests are rejected");
+    const invalidCodes = [1236, null, {}, "", "123", "1237", "12306", "09918", "0000", "1000", "10001", "1001 ", " 1001", "123６", "๑๒๓๖", "1e36", "+1236", "1236\n", "abcd"];
+    for (const [index, code] of invalidCodes.entries()) {
+      assert.equal((await post("/api/sessions", { code }, undefined, { "X-Forwarded-For": `192.0.2.${100 + index}` })).status, 401, `Invalid player code: ${JSON.stringify(code)}`);
     }
     child.kill();
     await once(child, "exit");
@@ -522,7 +563,7 @@ try {
   assert.equal(changes, 0);
   assert.equal(state.reorder([]), true);
   assert.equal(existsSync(join(temp, "unexpected-ai-request")), false, "requests never call AI or fetch moderation metadata");
-  console.log("PASS: concurrent joins assign one automatic Admin per room; isolated rooms/queues/settings; primary Admin/Controller grant/revoke; Auto Queue authorization/sync/refresh/priority/closing; heartbeat/expiry/in-flight requests; restart; lifecycle logs; rate limits; queue controls; Thailand search; unmodified video queries/order; AI disabled; validation.");
+  console.log("PASS: checksum room creation/concurrent joins; multiple Players/deduplicated completion; Admin grant/revoke and Controller grant-only; isolated rooms/queues/settings; Auto Queue; heartbeat/expiry/in-flight requests; restart; lifecycle logs; rate limits; queue controls; Thailand search; unmodified video queries/order; AI disabled; validation.");
 } finally {
   for (const ws of sockets) ws.terminate();
   if (child && child.exitCode === null) { child.kill(); await once(child, "exit"); }

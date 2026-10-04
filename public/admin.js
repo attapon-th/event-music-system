@@ -3,12 +3,11 @@ let adminState = { nowPlaying: null, queue: [], paused: false, volume: 60 };
 let adminAuthenticated = false;
 let adminRoom = { participants: [], filterOn: false, moderationMode: "default", cooldownSeconds: 5 };
 let draggingId = null;
+const pendingRemovals = new Map();
 const adminFeedback = document.getElementById("admin-feedback");
 const adminControls = document.querySelectorAll(".admin-controls button, .admin-controls input");
 const queueIcons = {
   playNow: '<path d="m8 5 11 7-11 7Z"/>',
-  moveUp: '<path d="m6 14 6-6 6 6"/>',
-  moveDown: '<path d="m6 10 6 6 6-6"/>',
   remove: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
 };
 
@@ -16,6 +15,38 @@ function adminSend(message) {
   if (adminAuthenticated) {
     Room.send(message);
   } else adminFeedback.textContent = t("offline");
+}
+
+function cancelRemoval(id) {
+  clearTimeout(pendingRemovals.get(id)?.timer);
+  pendingRemovals.delete(id);
+}
+
+function cancelPendingRemovals() {
+  for (const id of pendingRemovals.keys()) cancelRemoval(id);
+}
+
+window.addEventListener("pagehide", cancelPendingRemovals);
+window.addEventListener("pageshow", (event) => { if (event.persisted) renderAdmin(); });
+
+function startRemoval(id) {
+  if (!adminAuthenticated || pendingRemovals.has(id) || !adminState.queue.some(item => item.id === id)) return;
+  const pending = { deadline: Date.now() + 5000 };
+  pendingRemovals.set(id, pending);
+  function tick() {
+    if (pendingRemovals.get(id) !== pending) return;
+    const seconds = Math.max(0, Math.ceil((pending.deadline - Date.now()) / 1000));
+    if (!seconds) {
+      cancelRemoval(id);
+      if (adminAuthenticated && adminState.queue.some(item => item.id === id)) adminSend({ type: "remove", id });
+      renderAdmin();
+      return;
+    }
+    if (pending.label) pending.label.textContent = t("removeCountdown", { seconds });
+    pending.timer = setTimeout(tick, Math.min(1000, pending.deadline - Date.now()));
+  }
+  renderAdmin();
+  tick();
 }
 
 function connectAdmin() {
@@ -34,6 +65,7 @@ function connectAdmin() {
       renderAdmin();
     },
     onError(msg) { adminFeedback.textContent = msg.error; },
+    onEnd() { adminAuthenticated = false; draggingId = null; cancelPendingRemovals(); renderAdmin(); },
     onOffline() {
       adminAuthenticated = false;
       draggingId = null;
@@ -44,6 +76,9 @@ function connectAdmin() {
 }
 
 function renderAdmin() {
+  for (const id of pendingRemovals.keys()) {
+    if (!adminAuthenticated || !adminState.queue.some(item => item.id === id)) cancelRemoval(id);
+  }
   document.getElementById("admin-title").textContent = t("adminRoomTitle", { code: adminRoom.code || Room.code });
   document.title = document.getElementById("admin-title").textContent;
   const autoQueueToggle = document.getElementById("admin-auto-queue");
@@ -68,6 +103,7 @@ function renderAdmin() {
     now.textContent = t("idle");
   }
   const queueEl = document.getElementById("queue");
+  const focusedAction = document.activeElement?.dataset;
   queueEl.replaceChildren();
   if (!adminState.queue.length) {
     const li = document.createElement("li");
@@ -79,6 +115,8 @@ function renderAdmin() {
     const li = document.createElement("li");
     li.dataset.id = item.id;
     const handle = document.createElement("button");
+    handle.dataset.queueId = item.id;
+    handle.dataset.queueAction = "drag";
     handle.className = "drag-handle";
     handle.textContent = "☰";
     handle.setAttribute("aria-label", t("drag"));
@@ -99,16 +137,33 @@ function renderAdmin() {
     actions.className = "queue-actions";
     for (const [key, message] of [
       ["playNow", { type: "playNow", id: item.id }],
-      ["moveUp", { type: "move", id: item.id, dir: "up" }],
-      ["moveDown", { type: "move", id: item.id, dir: "down" }],
       ["remove", { type: "remove", id: item.id }],
     ]) {
+      if (key === "remove" && pendingRemovals.has(item.id)) {
+        const pending = pendingRemovals.get(item.id);
+        const label = document.createElement("span");
+        label.className = "remove-countdown";
+        label.setAttribute("role", "status");
+        label.setAttribute("aria-live", "polite");
+        label.textContent = t("removeCountdown", { seconds: Math.max(1, Math.ceil((pending.deadline - Date.now()) / 1000)) });
+        pending.label = label;
+        const cancel = document.createElement("button");
+        cancel.dataset.queueId = item.id;
+        cancel.dataset.queueAction = key;
+        cancel.className = "cancel-removal";
+        cancel.textContent = t("cancelRemoval");
+        cancel.onclick = () => { cancelRemoval(item.id); renderAdmin(); };
+        actions.append(label, cancel);
+        continue;
+      }
       const button = document.createElement("button");
+      button.dataset.queueId = item.id;
+      button.dataset.queueAction = key;
       button.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${queueIcons[key]}</svg>`;
       button.title = t(key);
       button.setAttribute("aria-label", t(key));
       button.disabled = !adminAuthenticated;
-      button.onclick = () => adminSend(message);
+      button.onclick = () => key === "remove" ? startRemoval(item.id) : adminSend(message);
       actions.append(button);
     }
     li.append(handle, img, meta, actions);
@@ -139,6 +194,10 @@ function renderAdmin() {
     };
     handle.onpointercancel = () => { draggingId = null; renderAdmin(); };
   }
+  if (focusedAction?.queueId) {
+    [...queueEl.querySelectorAll("button")].find(button => button.dataset.queueId === focusedAction.queueId &&
+      button.dataset.queueAction === focusedAction.queueAction)?.focus();
+  }
 }
 
 function songMeta(item) {
@@ -158,7 +217,7 @@ document.getElementById("admin-volume").oninput = (event) => {
 function renderParticipants() {
   const list = document.getElementById("participants-list");
   list.replaceChildren();
-  const visible = adminAuthenticated && adminRoom.role === "admin";
+  const visible = adminAuthenticated && ["admin", "controller"].includes(adminRoom.role);
   setParticipantsVisible(visible);
   if (!visible) return;
   for (const person of adminRoom.participants || []) {
@@ -168,7 +227,8 @@ function renderParticipants() {
       : person.role === "player" ? "Player" : "Guest";
     label.textContent = `${person.name} · ${role} · ${t(person.online ? "online" : "participantOffline")}`;
     row.append(label);
-    if (adminAuthenticated && adminRoom.memberId === adminRoom.primaryAdminId && !["admin", "player"].includes(person.role)) {
+    if (!["admin", "player"].includes(person.role) &&
+        (adminRoom.role === "admin" || (adminRoom.role === "controller" && person.role === "guest"))) {
       const button = document.createElement("button");
       const enabled = person.role !== "controller";
       button.type = "button";

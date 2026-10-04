@@ -4,13 +4,16 @@ import { Sessions, SESSION_TTL_MS } from "../src/sessions.js";
 let time = 0;
 const events = [];
 const sessions = new Sessions({ cooldownSeconds: 15 }, {
-  now: () => time, pickCode: () => 999, log: (line) => events.push(JSON.parse(line)),
+  now: () => time, log: (line) => events.push(JSON.parse(line)),
 });
-const a = sessions.create();
-const b = sessions.create();
+const a = sessions.create("999");
+const b = sessions.create("100");
 assert.equal(a.code, "999");
-assert.equal(b.code, "100", "collisions wrap around without an endless random loop");
+assert.equal(b.code, "100", "room creation uses the requested number");
+assert.equal(sessions.create("999"), a, "repeated creation returns the same live room");
 const player = sessions.issue(a, "player");
+const secondPlayer = sessions.issue(a, "player");
+assert.notEqual(secondPlayer.token, player.token);
 assert.equal(player.role, "player");
 assert.equal(a.primaryAdminId, null, "Player creation does not claim Admin authority");
 const member = sessions.issue(a, "guest");
@@ -38,7 +41,7 @@ sessions.detach(client);
 time += SESSION_TTL_MS;
 assert.equal(sessions.authenticate(member.token), null, "deleted room invalidates every credential");
 assert.equal(sessions.tokens.size, 0);
-const replacement = sessions.create();
+const replacement = sessions.create("999");
 assert.equal(replacement.code, a.code);
 assert.notEqual(replacement.id, a.id);
 assert.equal(sessions.get(a.code, a.id), null, "old QR cannot enter a reused number");
@@ -46,11 +49,12 @@ assert.equal(replacement.primaryAdminId, null, "a reused room number starts with
 assert.equal(sessions.issue(replacement, "guest").role, "admin", "a replacement room chooses its own first Admin");
 assert.deepEqual(events.map(event => event.event), ["created", "created", "deleted", "deleted", "created"]);
 assert.ok(events.every(event => Object.keys(event).sort().join() === "at,event,room,sessionId"));
-for (let i = 1; i < 900; i++) sessions.create();
+for (let i = 100; i < 999; i++) sessions.create(String(i));
 assert.equal(sessions.rooms.size, 900);
 assert.equal(new Set(sessions.rooms.keys()).size, 900);
-assert.equal(sessions.create(), null, "full server declines creation");
+assert.equal(sessions.create("999"), replacement, "an existing room can be entered at full capacity");
+for (const code of [undefined, 123, "099", "1000", "abc", "100\n"]) assert.equal(sessions.create(code), null);
 time += SESSION_TTL_MS;
-assert.ok(sessions.create(), "expired rooms free capacity");
+assert.ok(sessions.create("100"), "expired rooms free capacity");
 assert.equal(sessions.rooms.size, 1);
-console.log("PASS: first participant automatically becomes Admin; Player/later Guests/offline owner; session expiry, reconnect, collision/reuse, 900-room limit, token cleanup, lifecycle-only logs.");
+console.log("PASS: first participant automatically becomes Admin; Player/later Guests/offline owner; session expiry, reconnect, explicit codes/reuse, 900-room limit, token cleanup, lifecycle-only logs.");

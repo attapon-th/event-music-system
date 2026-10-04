@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 const source = ["i18n.js", "session.js"].map(file => readFileSync(new URL(`../public/${file}`, import.meta.url), "utf8")).join("\n");
 
-function page(screen, search, storage, respond) {
+function page(screen, search, storage, respond, tabStorage = new Map()) {
   const nodes = new Map();
   function node(id) {
     if (!nodes.has(id)) {
@@ -33,6 +33,7 @@ function page(screen, search, storage, respond) {
     history: { replaceState(_state, _title, url) { this.url = url; } },
     document: { body: { dataset: { screen }, prepend() {}, append() {} }, getElementById: node, createElement: () => node("panel"), querySelectorAll: () => [] },
     localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
+    sessionStorage: { getItem: key => tabStorage.get(key), setItem: (key, value) => tabStorage.set(key, value), removeItem: key => tabStorage.delete(key) },
     fetch: async (path, options) => {
       const body = options.body ? JSON.parse(options.body) : undefined;
       requests.push({ path, body, headers: options.headers });
@@ -66,11 +67,11 @@ function page(screen, search, storage, respond) {
   };
 }
 const member = { code: "123", sessionId: "room-id", token: "member-token", memberId: "guest-id", role: "guest" };
-let wrongPassword = true;
+let wrongCode = true;
 const entry = page("player", "", new Map(), (path, body) => {
   assert.equal(path, "/api/sessions");
-  assert.equal(body.password, "001234");
-  if (wrongPassword) return { status: 401, data: { error: "รหัสสร้างไม่ถูกต้อง", retryIn: 5 } };
+  assert.equal(body.code, "1236");
+  if (wrongCode) return { status: 401, data: { error: "รหัสสร้างไม่ถูกต้อง", retryIn: 5 } };
   return { data: { ...member, role: "player", token: "player-token" } };
 });
 assert.equal(await entry.run("Room.ready"), false);
@@ -84,15 +85,15 @@ assert.equal(entry.nodes.get("entry-code").pattern, "[0-9]+");
 assert.equal(entry.nodes.get("entry-code").autocomplete, "off");
 assert.equal(entry.nodes.get("entry-code")["aria-label"], "รหัสสร้างห้องหรือเลขห้อง");
 entry.nodes.get("start-btn").onclick();
-assert.equal(entry.requests.length, 0, "Start reveals the password field without creating a room");
+assert.equal(entry.requests.length, 0, "Start reveals the entry field without creating a room");
 assert.equal(entry.nodes.get("room-create").hidden, false);
 assert.equal(entry.nodes.get("entry-code").focused, true);
 assert.equal(entry.nodes.get("start-btn").hidden, true);
 entry.run("Room.onJoined = () => { globalThis.opened = true; }");
-entry.nodes.get("entry-code").value = "001234";
+entry.nodes.get("entry-code").value = "1236";
 await entry.nodes.get("room-create").onsubmit({ preventDefault() {} });
 assert.equal(entry.nodes.get("room-error").textContent, "รหัสสร้างไม่ถูกต้อง");
-assert.equal(entry.nodes.get("room-create").hidden, false, "wrong passwords keep the entry field available for retry");
+assert.equal(entry.nodes.get("room-create").hidden, false, "wrong codes keep the entry field available for retry");
 assert.equal(entry.nodes.get("room-content").hidden, true);
 assert.equal(entry.nodes.get("room-create").querySelector().disabled, true);
 assert.equal(entry.nodes.get("room-retry").textContent, "ลองใหม่ได้ใน 5 วินาที");
@@ -103,7 +104,7 @@ assert.equal(entry.nodes.get("room-retry").textContent, "ลองใหม่�
 entry.advance(4000);
 assert.equal(entry.nodes.get("room-create").querySelector().disabled, false);
 assert.equal(entry.nodes.get("room-retry").textContent, "");
-wrongPassword = false;
+wrongCode = false;
 await entry.nodes.get("room-create").onsubmit({ preventDefault() {} });
 assert.equal(entry.run("opened"), true, "Creation immediately opens the Player in the same document");
 assert.equal(entry.location.href, undefined, "Creation does not navigate away from its user gesture");
@@ -151,14 +152,14 @@ await failedJoin.nodes.get("room-create").onsubmit({ preventDefault() {} });
 assert.equal(failedJoin.nodes.get("room-retry").textContent, "ลองใหม่ได้ใน 5 วินาที");
 const networkError = page("player", "", new Map(), () => { throw new Error("offline"); });
 await networkError.run("Room.ready");
-networkError.nodes.get("entry-code").value = "001234";
+networkError.nodes.get("entry-code").value = "1236";
 await networkError.nodes.get("room-create").onsubmit({ preventDefault() {} });
 assert.equal(networkError.nodes.get("room-create").querySelector().disabled, false);
 assert.equal(networkError.nodes.get("room-retry").textContent, "");
 let resolvePending;
 const submitting = page("player", "", new Map(), () => new Promise(resolve => { resolvePending = resolve; }));
 await submitting.run("Room.ready");
-submitting.nodes.get("entry-code").value = "001234";
+submitting.nodes.get("entry-code").value = "1236";
 const pendingSubmit = submitting.nodes.get("room-create").onsubmit({ preventDefault() {} });
 await submitting.nodes.get("room-create").onsubmit({ preventDefault() {} });
 assert.equal(submitting.requests.length, 1, "An in-flight submission cannot create duplicate rooms");
@@ -238,7 +239,7 @@ assert.match(expired.location.href, /^\/guest\?room=123&session=room-id$/);
 
 const playerKey = "music-session:room-id:player";
 const playerStorage = new Map([[playerKey, "player-token"]]);
-const player = page("player", "?room=123&session=room-id", playerStorage, () => ({ data: { ...member, token: "player-token", role: "player" } }));
+const player = page("player", "?room=123&session=room-id", new Map(), () => ({ data: { ...member, token: "player-token", role: "player" } }), playerStorage);
 assert.equal(await player.run("Room.ready"), true);
 player.run("Room.connect({ onEnd() { globalThis.ended = true; } })");
 player.sockets[0].onmessage({ data: JSON.stringify({ type: "sessionEnded", code: "ROOM_CLOSED", error: "ห้องปิดแล้ว" }) });
@@ -253,9 +254,9 @@ assert.equal(player.history.url, "/");
 
 for (const viaHttp of [false, true]) {
   const lostStorage = new Map([[playerKey, "player-token"]]);
-  const lost = page("player", "?room=123&session=room-id", lostStorage, path => path === "/api/state"
+  const lost = page("player", "?room=123&session=room-id", new Map(), path => path === "/api/state"
     ? { status: 401, data: { code: "SESSION_INVALID", error: "ห้องหาย" } }
-    : { data: { ...member, token: "player-token", role: "player" } });
+    : { data: { ...member, token: "player-token", role: "player" } }, lostStorage);
   await lost.run("Room.ready");
   lost.run("Room.connect({ authData: () => ({completed:[{id:'song-id',videoId:'song0000001',failed:false}]}), onUnavailable(message) { globalThis.lostMessage = message; return true; }, onEnd() { globalThis.ended = true; } })");
   lost.sockets[0].onopen();
@@ -275,12 +276,36 @@ for (const viaHttp of [false, true]) {
   assert.equal(lost.history.url, "/");
 }
 
-const movedStorage = new Map([[playerKey, "player-token"]]);
-const moved = page("player", "?room=123&session=room-id", movedStorage,
-  () => ({ data: { ...member, token: "player-token", role: "player" } }));
-await moved.run("Room.ready");
-moved.run("Room.connect({onUnavailable() { throw new Error('Player takeover must stop immediately'); }, onEnd() { globalThis.ended = true; }})");
-moved.sockets[0].onmessage({ data: JSON.stringify({ type: "sessionEnded", code: "PLAYER_MOVED" }) });
-assert.equal(moved.run("ended"), true);
-assert.equal(movedStorage.get(playerKey), "player-token", "Moving Player tabs retains refresh credentials");
-console.log("PASS: Player welcome/password/retry/startup, automatic Admin via QR/manual join/refresh, later Guest admission, /a promotion/revocation redirects, reconnect, room close (DOM simulated).");
+// Player tabs use independent storage, and leaving is entirely local.
+const sharedStorage = new Map();
+const tabs = [new Map(), new Map()];
+const players = tabs.map((tabStorage, index) => page("player", "", sharedStorage,
+  (path, body) => {
+    assert.equal(path, "/api/sessions");
+    assert.equal(body.code, "1236");
+    return { data: { ...member, role: "player", token: `player-${index}` } };
+  }, tabStorage));
+for (const tab of players) {
+  await tab.run("Room.ready");
+  tab.nodes.get("entry-code").value = "1236";
+  await tab.nodes.get("room-create").onsubmit({ preventDefault() {} });
+  tab.run("Room.connect({onEnd() { globalThis.ended = true; }})");
+}
+assert.equal(sharedStorage.has(playerKey), false, "Player credentials are never shared through localStorage");
+assert.equal(tabs[0].get(playerKey), "player-0");
+assert.equal(tabs[1].get(playerKey), "player-1");
+const refreshed = page("player", "?room=123&session=room-id", sharedStorage, (_path, _body, headers) => {
+  assert.equal(headers.Authorization, "Bearer player-1");
+  return { data: { ...member, role: "player", token: "player-1" } };
+}, tabs[1]);
+assert.equal(await refreshed.run("Room.ready"), true, "Player credentials survive refresh in the same tab");
+players[0].run("Room.leave()");
+assert.equal(players[0].run("ended"), true);
+assert.equal(players[0].sockets[0].readyState, 3);
+assert.equal(players[0].requests.length, 1, "Leave makes no close-room HTTP request");
+assert.equal(tabs[0].has(playerKey), false);
+assert.equal(tabs[1].get(playerKey), "player-1", "Leaving one tab retains other Player credentials");
+assert.equal(players[1].sockets[0].readyState, 1);
+assert.equal(players[0].history.url, "/");
+assert.equal(players[0].nodes.get("start-btn").hidden, false);
+console.log("PASS: Player checksum entry/retry/tab storage/local leave, automatic Admin and Guest admission, role redirects, reconnect, room expiry (DOM simulated).");

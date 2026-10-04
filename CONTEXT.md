@@ -1,7 +1,7 @@
 # คิวเพลิน
 
 Independent jukebox sessions for events or venues: guests choose songs, an admin manages
-the running order, and a designated player supplies music to the venue.
+the running order, and Players supply music to the venue.
 
 ## Language
 
@@ -9,13 +9,18 @@ the running order, and a designated player supplies music to the venue.
 
 **Session**:
 One temporary music room with its own running order, settings, guests, admins,
-and designated Player. It ends after everyone has left for an hour.
+and Players. It ends after everyone has left for an hour.
 _Avoid_: Login session, permanent venue.
 
 **Room number**:
 The three-digit number used to find and join a live Session. A later Session
 may have the same number without inheriting its people or music.
 _Avoid_: Password, permanent identity.
+
+**Player entry code**:
+A room number followed by the sum of its three digits, without padding the sum
+with zeros. It creates that Session if absent, or joins its Players if already live.
+_Avoid_: Secret password, random room number.
 
 ### People and screens
 
@@ -27,12 +32,12 @@ _Avoid_: Admin, host, account holder.
 **Admin**:
 The first person to join by room number or QR link, automatically given room authority.
 This primary operator controls playback
-and the queue, and is the only person who grants or revokes Controller authority.
+and the queue, and can grant or revoke Controller authority; Admin authority is fixed.
 _Avoid_: Guest, player.
 
 **Controller**:
-A participant given playback and queue-management authority by the Admin.
-A Controller cannot grant or revoke anyone else's authority.
+A participant given playback and queue-management authority by an Admin or Controller.
+A Controller can grant that authority to Guests, but cannot revoke it or change Admin/Player authority.
 _Avoid_: Primary Admin, Player.
 
 **Participant**:
@@ -41,8 +46,8 @@ nickname. They remain listed while offline until the Session ends.
 _Avoid_: Nickname as proof of identity.
 
 **Player**:
-The designated screen/device that plays the selected song through the venue's
-audio system, typically a TV, TV Box, or projector-connected computer.
+A screen/device that plays the selected song, typically a TV, TV Box, or projector-connected computer.
+Several Players may share a Session's song, pause state, and volume without synchronizing song position.
 _Avoid_: Admin dashboard, guest phone.
 
 **Host**:

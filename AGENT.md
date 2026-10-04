@@ -1,7 +1,7 @@
 # Agent guide
 
-Maintain independent temporary jukebox rooms: each has one designated TV/TV Box
-Player, guests requesting songs, and authorized admins managing playback.
+Maintain independent temporary jukebox rooms: each has TV/TV Box Players,
+guests requesting songs, and authorized Admins/Controllers managing playback.
 Extend the existing implementation and preserve that workflow.
 
 Read [CONTEXT.md](CONTEXT.md) when naming or changing domain concepts. Read
@@ -48,34 +48,41 @@ There is no frontend bundler or compilation step.
   the relative order of the other queued items.
 - Reorder accepts a complete permutation of the current queue item IDs. Reject
   incomplete, duplicate, or obsolete ID sets so concurrent requests cannot disappear.
-- Use queue item `id` for editing and YouTube `videoId` for duplicate detection
-  and completion reports. Preserve the stale `ended`/`error` guard.
+- Use queue item `id` for editing and YouTube `videoId` for duplicate detection.
+  Player `ended`/`error` reports must match both current item `id` and `videoId`;
+  duplicate reports from multiple Players must advance only once.
+- Admin/Controller queue removal waits five seconds per item before sending `remove`.
+  Cancel on user cancellation, item disappearance/promotion, disconnect, role loss,
+  or page exit (including browser cache). Snapshots never reset the deadline.
+  Keep drag reorder and Play Now; no up/down buttons in this tab.
 - Recheck duplicate and queue-cap conditions after asynchronous YouTube
   work. The request limit is 50 upcoming tracks; history is capped at 100 items.
 - Playback state and volume belong to the server snapshot. Player applies them
   through the IFrame API; Admin remains a controller rather than an audio source.
   New rooms start at 60% volume, applied before loading the first video, with
   Auto Queue enabled and a five-second request cooldown.
-- `HOST_PASSWORD` authorizes room creation and contains only ASCII digits, at least
-  four digits; invalid configuration exits before listening. Existing nonnumeric
-  passwords must be replaced before restarting. Root entry displays digits openly
-  in a text input with a numeric keyboard hint and accepts either this password or
-  a three-digit room number using the existing join API. Keep credentials as strings
-  to preserve leading zeros. Failed entry
+- Root entry keeps its existing text and numeric keyboard hint. A three-digit room
+  number joins through the existing join API. Player entry is the room number
+  (`100–999`) followed by its digit sum without zero padding: `1236`, `78924`.
+  `POST /api/sessions` takes `{ code }`, validates on the server, and atomically
+  creates or reuses that room. `HOST_PASSWORD` is ignored and optional. Failed entry
   locks browser submission for five seconds; HTTP 429 carries the remaining retry time.
 - Every WebSocket authenticates a room credential before receiving a snapshot.
   The first participant joining by room number or QR becomes the primary Admin
   atomically during admission and opens `/a`. Later participants are Guests;
   re-entry preserves existing roles, including an offline Admin's authority.
   Check membership on every command; only Player reports completion/errors, and
-  only the primary Admin grants/revokes Controller rights. Controllers manage playback
-  and settings. Only the primary Admin receives the participant roster and tab.
+  Admin grants/revokes Controller rights; Controller can only grant to a Guest
+  in the same room. Admin and Player roles cannot be edited. Admin/Controller
+  receive the participant roster and tab; never expose credentials in that roster.
   Role changes update keyboard tab navigation and trigger role redirects.
 - All room data is in memory. Last-disconnect starts the 60-minute idle deadline;
   live connections cancel it, heartbeat removes dead ones, and restart clears all rooms.
   Seed each room's settings from environment defaults. stdout logs only create/delete.
 - Room numbers may be reused; internal session IDs and credentials must prevent old
-  links or credentials entering a replacement room. Player exit deletes the room immediately.
+  links or credentials entering a replacement room. Player credentials live in
+  per-tab `sessionStorage`; participant credentials keep using `localStorage`.
+  Player exit stops/disconnects only that page; other Players and the room survive.
 
 ## Integration and UI details
 
@@ -108,12 +115,17 @@ There is no frontend bundler or compilation step.
   Room nicknames survive refresh/reconnect within the same session.
 - Player entry shows the welcome screen first. Start reveals the shared credential
   field with an accessible name and icon-only next button; successful creation opens
-  Player, and closing the room restores welcome. Handle autoplay blocking with
+  Player, and leaving restores welcome. Multiple Players share song/queue/pause/volume;
+  a new Player starts the current song at its beginning, without position sync.
+  Handle autoplay blocking with
   the existing play button without skipping tracks. Preserve playback-error handling,
   the watchdog's hidden-tab/buffering exceptions, and reconnect authentication.
 - Disconnect keeps cached playback running. Player reconciles finished item IDs
   before accepting a reconnect snapshot; a missing room drains its cached queue
-  before returning to welcome. Explicit close and Player takeover stop immediately.
+  before returning to welcome. Explicit room closure stops immediately;
+  opening another Player never takes over or stops existing Players.
+- Preserve the current YouTube iframe and controls. The multi-monitor hover-overlay
+  issue is deferred; do not recreate the iframe per song or use deprecated `autohide`.
 - All pages share the install manifest and qp assets. Install UI belongs to the
   welcome screen only and hides while a room is active. Installation uses
   native browser prompts or iOS home-screen instructions, without a service worker.
@@ -124,7 +136,7 @@ There is no frontend bundler or compilation step.
 
 Use `bun install`, `bun start`, and `bun run test`. Test code launches Node,
 binds temporary localhost ports, copies source into a temporary directory, and
-mocks YouTube responses; it does not exercise actual IFrame audio or UI drag/drop.
+mocks YouTube responses and simulates UI/drag events; it does not exercise actual IFrame audio or browser drag/drop.
 For Player/UI changes, follow the browser/TV checklist in README, including Guest
 requests, Admin controls, queue synchronization, refresh, and unauthenticated access.
 The standalone `check-llm` script is retained for future AI work.

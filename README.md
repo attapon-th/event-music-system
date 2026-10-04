@@ -38,7 +38,9 @@ Built for a real graduation dinner in Hong Kong; designed to work for any event.
   per-guest request cooldown (five seconds by default) on Admin. Each room has independent settings, queue and playback, held only in memory.
 - 🔁 **Auto Queue** — enabled by default, with YouTube video recommendations after requested songs run out;
   Player/Admin can toggle it, and new requests play after the current automatic song finishes.
-- 🔒 **Rooms** — three-digit codes and direct QR entry. `HOST_PASSWORD` creates rooms, only. The first participant automatically becomes Admin and assigns/revokes Controller rights. Later participants join as Guests.
+- 🔒 **Rooms** — three-digit codes and direct QR entry. Append the digit sum to create/join Player (`1236` → room `123`). The first participant automatically becomes Admin; later participants join as Guests. Admin grants/revokes Controller rights; Controllers can grant them to Guests.
+- 📺 **Multiple Players** — concurrent screens share song, queue, pause and volume. Each new Player starts the current song from the beginning; song positions are independent.
+- ↩️ **Cancel deletion** — Admin/Controller queue removals wait five seconds, with a separate countdown and cancel button per song. Drag reorder and Play Now remain available.
 - 📲 **Installable** — qp music-note icon, Chrome desktop/Android installation and
   iPhone/iPad Add to Home Screen. Opens the shared entry screen as a standalone app.
 - 🛡 **Queue guardrails** — duplicate rejection, per-phone cooldown (works
@@ -59,18 +61,18 @@ Built for a real graduation dinner in Hong Kong; designed to work for any event.
 git clone https://github.com/attapon-th/event-music-system.git
 cd event-music-system
 bun install
-cp .env.example .env      # set HOST_PASSWORD
+cp .env.example .env      # configure PUBLIC_URL for your deployment
 bun start
 ```
 
 Open **http://localhost:45416/** on the machine, drag it to the projector, and
-press **เริ่มเล่น**, enter the creation password (`HOST_PASSWORD`, digits `0–9` only, at least four digits)
-or an existing three-digit room number, then press the arrow icon. The password
-creates a room and opens Player; a room number joins the room, preserving any saved
+press **เริ่มเล่น**, enter a room number (`100–999`) followed by the sum of its digits,
+then press the arrow icon. Examples: `1001`, `1236`, `78924`, `99927`; do not pad the sum with zeros.
+This creates the specified room or opens another Player in the existing room.
+A three-digit room number joins the room, preserving any saved
 Admin/Controller role. The first participant goes straight to Admin at `/a`;
 later participants enter Guest. The entry displays digits openly and uses a numeric keyboard
-on mobile. Empty, shorter, or nonnumeric passwords prevent server startup; replace
-any existing nonnumeric password before restarting. Leading zeros are preserved.
+on mobile. No creation password is required; any legacy `HOST_PASSWORD` is ignored.
 New rooms start at **60% volume**. If the browser blocks audio, use its existing
 play button. Guests can also scan the QR or join directly at `/guest`.
 
@@ -91,12 +93,12 @@ play button. Guests can also scan the QR or join directly at `/guest`.
 
 | Path | Purpose |
 |------|---------|
-| `/` | Create a new room only, then show its Player immediately |
+| `/` | Shared room entry: create/join Player with the digit-sum code, or join as a participant with three digits |
 | `/guest` | Mobile page guests open via the QR |
 | `/explore` | Alias of the Guest page with Thailand charts on first load |
 | `/a` | Admin/Controller controls, queue editing and participant roster |
 | `/g` | Redirect to `/guest`, preserving room/session query parameters |
-| `POST /api/sessions` | `{ password }` → new room and Player credential |
+| `POST /api/sessions` | `{ code: "1236" }` → create/reuse room `123` and issue a Player credential; concurrent requests reuse one room |
 | `POST /api/sessions/join` | `{ code, sessionId? }` → first participant becomes Admin automatically, later participants become Guests; reuses a valid member credential |
 | `POST /api/sessions/close` | Player credential → delete room and disconnect everyone |
 | `GET /api/search?q=&mode=songs\|karaoke\|videos` | YouTube Music songs, karaoke or videos (no API key); video queries are unchanged and results keep YouTube order, including live and long videos |
@@ -110,6 +112,11 @@ Everything is in memory: queue, history, settings, admission and credentials.
 Rooms expire after the last connection has been gone for 60 minutes. A connected
 idle page keeps its room alive; heartbeat detects dead connections. A restart
 clears every room. Run one server process, with at most 900 concurrent rooms.
+Player credentials use per-tab `sessionStorage`; participant credentials retain
+`localStorage`. Opening another Player never disconnects existing ones, even
+when a duplicated tab shares its credential. **ออก** stops and disconnects only
+that Player page and returns it to welcome; the room and other devices remain.
+The explicit close API is separate and is not used by this button.
 
 By default, losing the server connection leaves the Player playing its current
 song and the upcoming queue from its last snapshot. It retries authentication
@@ -118,8 +125,8 @@ with the live room before its first snapshot, so the current song continues
 without restarting and new requests remain queued. Guest/Admin reconnects keep
 their membership and roles while the room exists. If the room disappeared after
 a restart or expiry, the Player finishes its cached queue before returning to
-the room creation screen. Explicit room closure or moving Player to another tab
-still stops it immediately. Keep the Player page open during an outage: the
+the room creation screen. Explicit room closure still stops it immediately.
+Keep the Player page open during an outage: the
 cached queue is in browser memory, and playback still needs access to YouTube;
 Auto Queue recommendations require the server connection.
 
@@ -150,7 +157,7 @@ Compose builds the image from source and tags it as `attap0n/qp:latest`:
 ```bash
 git clone https://github.com/attapon-th/event-music-system.git
 cd event-music-system
-cp .env.example .env          # set PUBLIC_URL to your domain, HOST_PASSWORD too
+cp .env.example .env          # set PUBLIC_URL to your domain
 docker compose up -d --build
 ```
 
@@ -214,14 +221,14 @@ commented list). The highlights:
 | Variable | What it does |
 |----------|--------------|
 | `PUBLIC_URL` | Public address the QR code points to (behind a reverse proxy) |
-| `HOST_PASSWORD` | Required creation password, digits `0–9` only, at least 4 digits; invalid values prevent startup |
 | `DEFAULT_REGION` | YouTube search/chart country, fallback `TH` |
 | `DEFAULT_LOCALE` | YouTube language/locale, fallback `th-TH` |
 | `PORT` | Listen port (default `45416`) |
 
 Cooldown is editable from Admin/Controller, with its value shown on the button.
 AI environment settings are inactive while AI is paused. Each room's runtime
-changes last only for that Session.
+changes last only for that Session. Legacy `HOST_PASSWORD` has no effect, and the
+server starts without it.
 
 ## Project layout
 
@@ -257,15 +264,16 @@ No frameworks, no build step, three dependencies (`express`, `ws`, `qrcode`).
 ตั้งค่าใน `.env` ก่อนเปิด Player/Admin:
 
 ```ini
-HOST_PASSWORD=482691
 DEFAULT_REGION=TH
 DEFAULT_LOCALE=th-TH
 ```
 
 เปิด `/` บน TV/TV Box จะเห็นโลโก้ qp กด **เริ่มเล่น** จึงแสดงช่อง **รหัสสร้างห้องหรือเลขห้อง**
-รหัสสร้าง (`HOST_PASSWORD`) ต้องเป็นตัวเลข `0–9` อย่างน้อย 4 หลัก มิฉะนั้น server จะไม่เริ่มทำงาน
-หากรหัสเดิมมีตัวอักษร ให้เปลี่ยนเป็นตัวเลขก่อนเริ่ม server ครั้งถัดไป
-ช่องกรอกแสดงตัวเลขตามปกติและใช้คีย์บอร์ดตัวเลขบนมือถือ โดยรักษาเลขศูนย์นำหน้า เช่น `001234`
+รหัสสร้าง/เข้า Player คือเลขห้อง `100–999` ต่อท้ายผลบวกแต่ละหลัก โดยไม่เติมศูนย์นำหน้าผลบวก
+เช่น `1001`, `1236`, `78924`, `99927` ถ้ายังไม่มีห้องจะสร้างตามเลขที่ระบุ ถ้ามีแล้วจะเข้า Player ร่วมกัน
+ตรวจรหัสที่ server; คำขอสร้างเลขเดียวกันพร้อมกันใช้ห้องเดียว ไม่สุ่มเลขห้อง
+ไม่ต้องตั้ง `HOST_PASSWORD` และค่าเดิมไม่มีผล ข้อความหน้าเข้าห้องยังเหมือนเดิม
+ช่องกรอกแสดงตัวเลขตามปกติและใช้คีย์บอร์ดตัวเลขบนมือถือ
 ช่องเดียวกันรับเลขห้อง 3 หลักเพื่อเข้า Guest หรือกลับ Admin/Controller ตามสิทธิ์เดิม
 ใช้ placeholder พร้อมชื่อสำหรับ accessibility และปุ่มไอคอนลูกศรต่อไป
 กรอกรหัสหรือเลขห้องผิดจะล็อกการส่งซ้ำ 5 วินาทีพร้อมนับถอยหลัง ทั้งปุ่มและ Enter
@@ -273,21 +281,24 @@ DEFAULT_LOCALE=th-TH
 เมื่อสร้างสำเร็จ Player เปิดทันที ห้องใหม่เริ่มที่ระดับเสียง **60%**
 หาก browser บล็อกเสียง ให้กดปุ่มเล่นเดิม; ระบบไม่ข้ามเพลงเพราะถูกบล็อก autoplay
 ห้องมีเลข 3 หลัก (`100–999`) และ QR ผู้ฟัง scan QR เข้าห้องทันที
-หรือเปิด `/guest` กรอกเลขห้องโดยไม่ต้องเลือกบทบาท ไม่มีการรับช่วง Player ห้องเดิม
+หรือเปิด `/guest` กรอกเลขห้องโดยไม่ต้องเลือกบทบาท
 
 ผู้เข้าร่วมห้องคนแรกผ่าน QR หรือเลขห้องเป็น **ผู้ดูแลหลัก (Admin)** อัตโนมัติ และเข้าหน้า `/a` ทันที
 คนถัดไปเข้าหน้า Guest โดยไม่ต้องกดรับสิทธิ์; Player ที่สร้างห้องยังเป็นเครื่องเล่น
 Admin เดิมยังคงสิทธิ์เมื่อ refresh/reconnect หรือกลับเข้าห้อง และไม่มีการส่งต่อสิทธิ์เพราะออฟไลน์
-เฉพาะผู้ดูแลหลักเท่านั้นที่ให้หรือถอนสิทธิ์ **ผู้ช่วยควบคุม (Controller)** ผ่านแท็บผู้เข้าร่วม
-Controller ควบคุมเพลงและการตั้งค่าได้ มีเฉพาะแท็บค้นหา/คิว และไม่ได้รับรายชื่อผู้เข้าร่วม
+Admin และ **ผู้ช่วยควบคุม (Controller)** เห็นแท็บผู้เข้าร่วมพร้อมสถานะออนไลน์
+Controller ควบคุมเพลงและการตั้งค่า และให้สิทธิ์ Controller กับ Guest ในห้องเดียวกันได้
+ปุ่มให้สิทธิ์ของ Controller แสดงเฉพาะ Guest; ถอนสิทธิ์ไม่ได้ ส่วน Admin ยังให้และถอนสิทธิ์ได้
+สิทธิ์ Admin และ Player เปลี่ยนไม่ได้ทั้งหน้าเว็บและคำสั่งตรงผ่าน WebSocket
 เมื่อได้รับสิทธิ์ browser เปลี่ยนไป `/a` ทันที; เมื่อถูกถอนกลับ `/guest` ทันที
 รายชื่อเก็บทุกคนที่เคยเข้าห้องจนห้องจบ พร้อมสถานะออนไลน์/ออฟไลน์
-ชื่อเล่นใช้แสดงผลเท่านั้น สิทธิ์ตรวจด้วยกุญแจที่ server ออกให้
+ชื่อเล่นใช้แสดงผลเท่านั้น สิทธิ์ตรวจด้วยกุญแจที่ server ออกให้ โดยไม่ส่งกุญแจในรายชื่อ
 
 Player ซ่อน/แสดงการ์ด QR ได้ และแสดงใต้ QR เป็น `ห้อง {rn} · yt1.lkzlab.uk/guest`
 ปุ่มประเภทงานบน Player ซ่อนไว้ หน้า `/a` ไม่มีปุ่มตัวกรองและซ่อนปุ่มล้างคิว
-เวลารอเพิ่มเพลงเริ่มต้นที่ **5 วินาที** ปุ่มเวลารอแสดงค่าในปุ่มโดยตรง ไม่มี label การตั้งค่าด้านล่าง ปุ่ม **ออก** ปิดห้องทันที
-และพาทุกคนกลับฟอร์มเลขห้อง (Player กลับหน้าเริ่ม)
+เวลารอเพิ่มเพลงเริ่มต้นที่ **5 วินาที** ปุ่มเวลารอแสดงค่าในปุ่มโดยตรง ไม่มี label การตั้งค่าด้านล่าง
+ปุ่ม **ออก** หยุดเสียงและตัดการเชื่อมต่อเฉพาะ Player หน้านั้น แล้วกลับหน้าเริ่ม ห้องและเครื่องอื่นยังอยู่
+Player เก็บกุญแจใน `sessionStorage` แยกแต่ละแท็บ ผู้เข้าร่วมยังใช้ `localStorage` ตามเดิม
 
 ข้อมูลทุกห้องอยู่ใน memory ของ server ลบหลังไม่มีอุปกรณ์เชื่อมต่อครบ 60 นาที
 หรือหายเมื่อ restart หน้า Guest/Admin จะแสดงฟอร์มเลขห้องเมื่อห้องหมดอายุ
@@ -299,7 +310,7 @@ Player ซ่อน/แสดงการ์ด QR ได้ และแสด�
 ปุ่มมุมขวาบนวิดีโอหรือ **F** เปิดวิดีโอเต็มจอ ปุ่มนี้ซ่อนขณะเต็มจอ
 กด **Back/Esc**, Back บนรีโมต TV หรือปุ่มย้อนกลับของ browser เพื่อกลับหน้า Player ปกติในห้องเดิม
 Browser ที่ไม่มี Fullscreen API จะขยายวิดีโอเต็มพื้นที่หน้าเว็บแทน รองรับปุ่มสื่อเล่น/หยุดและข้ามเพลงด้วย
-Guest/Controller แยก **ค้นหาเพลง** และ **คิวเพลง** เป็นคนละแท็บ; ผู้ดูแลหลักมีแท็บผู้เข้าร่วมพร้อมไอคอนกลุ่มคนเพิ่ม โดยคิวยังอัปเดตสดขณะอยู่แท็บค้นหา
+Guest แยก **ค้นหาเพลง** และ **คิวเพลง** เป็นคนละแท็บ; Admin/Controller มีแท็บผู้เข้าร่วมพร้อมไอคอนกลุ่มคนเพิ่ม โดยคิวยังอัปเดตสดขณะอยู่แท็บค้นหา
 กดปุ่มโหมด **วีดีโอ / คาราโอเกะ / เพลง** ได้ในแท็บค้นหา โดย Guest/Admin เริ่มต้นที่ **วีดีโอ**: เพลงใช้ YouTube Music หมวด Songs
 ส่วนคาราโอเกะใช้วิดีโอ YouTube และเติมคำว่า `karaoke` หากคำค้นยังไม่มีคำนี้หรือ “คาราโอเกะ”
 วีดีโอส่งคำค้นเดิมไป YouTube โดยไม่เติมคำ ไม่กรองเนื้อหาหรือความยาว รวมไลฟ์และวิดีโอยาว และแสดงตามลำดับที่ YouTube ส่งกลับ โดยรับเฉพาะวิดีโอ ไม่รวมช่องหรือเพลย์ลิสต์
@@ -321,11 +332,15 @@ UI ใช้ภาษาไทยเป็นหลักและอังก�
 ข้อความ UI อยู่ใน `public/i18n.js`
 ชื่อเพลงและข้อมูลศิลปินจาก YouTube แสดงตามต้นฉบับ
 
-Admin แสดงชื่อเพลง รูป ระยะเวลาและชื่อผู้เพิ่ม รองรับลากจัดลำดับด้วยเมาส์/สัมผัส
-และมีปุ่มเลื่อนขึ้น/ลงสำหรับคีย์บอร์ด คำสั่ง **ล้างคิว** ลบเฉพาะเพลงที่รอ (ปุ่มซ่อนไว้)
+Admin/Controller แสดงชื่อเพลง รูป ระยะเวลาและชื่อผู้เพิ่ม รองรับลากจัดลำดับด้วยเมาส์/สัมผัส
+เอาปุ่มเลื่อนขึ้น/ลงออก คำสั่ง **ล้างคิว** ลบเฉพาะเพลงที่รอ (ปุ่มซ่อนไว้)
+กดลบในแท็บคิวแล้วเพลงยังอยู่ แสดงนับถอยหลัง **5 → 1** และปุ่ม **ยกเลิกการลบ** ก่อนส่งคำสั่งเมื่อครบเวลา
+แต่ละเพลงนับแยกกัน กดซ้ำหรือคิวอัปเดตไม่เริ่มเวลาใหม่ ยกเลิกเมื่อเพลงออกจากคิว/เริ่มเล่น
+เมื่อหลุดการเชื่อมต่อ เสียสิทธิ์ หรือออก/รีเฟรชหน้า จะยกเลิกการลบที่ยังรอทั้งหมด
 **เล่นตอนนี้** เปลี่ยนเพลงปัจจุบันเป็นเพลงที่เลือก และเก็บเพลงที่เหลือไว้ตามลำดับเดิม
 รีเฟรชหน้าแล้วรับ snapshot ปัจจุบันจาก server ทันที แต่ restart server จะล้าง queue
-รวมถึงข้อมูลห้องและการตั้งค่าทั้งหมด แต่ละห้องใช้ Player หนึ่งเครื่องเป็นแหล่งเสียง
+รวมถึงข้อมูลห้องและการตั้งค่าทั้งหมด เปิด Player หลายหน้าต่าง/เครื่องได้โดยเครื่องเดิมยังเล่นต่อ
+ทุกเครื่องใช้เพลง คิว pause และ volume ร่วมกัน แต่ไม่ซิงก์ตำแหน่งเวลา เครื่องใหม่เริ่มเพลงปัจจุบันจากต้นเพลง
 
 ปุ่ม **เล่นต่ออัตโนมัติ: เปิด/ปิด** อยู่บน Player และ Admin; Controller ใช้ได้ด้วย
 ห้องใหม่เริ่มต้นเป็นเปิด และ Guest เห็นสถานะโดยเปลี่ยนค่าไม่ได้ เมื่อเปิดและคิวหลักว่าง
@@ -361,6 +376,7 @@ iPhone/iPad ใช้ปุ่ม **เพิ่มไปยังหน้า�
 โหลดชาร์ตประเทศ (`__hk_hits` ยังรองรับสำหรับ client เดิมและใช้ประเทศที่ตั้งค่า)
 
 Room APIs คืน `{ code, sessionId, token, role, memberId }` โดยไม่ใช้ `/api/host-token` หรือ Basic Auth
+`POST /api/sessions` รับ `{ code: "1236" }` และคืนเลขห้องสามหลักกับกุญแจ Player ใหม่ โดยใช้ session ID เดิมหากห้องมีอยู่
 ส่ง `Authorization: Bearer TOKEN` สำหรับ `/api/info`, `/api/request`, การกลับเข้าห้องด้วยสิทธิ์เดิม และการปิดห้อง
 ส่ง `X-Session-Id` เพิ่มได้เพื่อยืนยันว่ากุญแจตรงกับห้องที่ต้องการ
 การกรอกเลขหรือรหัสผิดรวม 10 ครั้งต่อนาทีต่อ IP จะถูกปฏิเสธชั่วคราวด้วย HTTP 429
@@ -377,9 +393,9 @@ Player เพิ่ม `completed: [{ id, videoId, failed: boolean }]` ใน `a
 
 | Event | Payload / ผลลัพธ์ |
 | --- | --- |
-| `state` | `{ state, code, sessionId, role, memberId, primaryAdminId, filterOn, moderationMode, cooldownSeconds, eventContext }`; เฉพาะ Admin มี `participants` |
-| `setParticipantRole` | ผู้ดูแลหลักส่ง `{ id: participantId, enabled: true/false }` เพื่อให้/ถอนสิทธิ์ Controller |
-| `sessionEnded` | ปิดห้อง (`ROOM_CLOSED`) หรือย้าย Player ไปแท็บใหม่ (`PLAYER_MOVED`) |
+| `state` | `{ state, code, sessionId, role, memberId, primaryAdminId, filterOn, moderationMode, cooldownSeconds, eventContext }`; Admin/Controller มี `participants: [{ id, name, role, online }]` โดยไม่มี credential |
+| `setParticipantRole` | `{ id: participantId, enabled }`; Admin ให้/ถอน Controller ได้, Controller ส่งได้เฉพาะ `enabled: true` ให้ Guest ในห้องเดียวกัน; ห้ามแก้ Admin/Player |
+| `sessionEnded` | ปิดห้อง (`ROOM_CLOSED`); เปิด Player เพิ่มไม่ตัดเครื่องเดิม |
 | `reorder` | `{ ids: [queueItemId, ...] }` ต้องเป็น ID ครบทุกเพลง ห้ามซ้ำ; stale order ถูกปฏิเสธ |
 | `clear` | ล้างเพลงที่รอทั้งหมด |
 | `playNow` | `{ id }` เปลี่ยนไปเล่นเพลงในคิวทันที |
@@ -387,7 +403,7 @@ Player เพิ่ม `completed: [{ id, videoId, failed: boolean }]` ใน `a
 | `setVolume` | `{ volume: 0–100 }` ปรับเสียง Player ของห้องผ่าน snapshot |
 | `setAutoQueue` | `{ enabled: true/false }`; Player/Admin/Controller เปิดหรือปิดการเล่นต่อเมื่อคิวหลักหมด |
 | `skip`, `remove`, `move` | Event เดิม; `remove` ใช้ `{ id }`, `move` ใช้ `{ id, dir: "up"/"down" }` |
-| `ended`, `error` | Event เดิมจาก Player; ข้ามเฉพาะเมื่อ `videoId` ตรงกับเพลงปัจจุบัน |
+| `ended`, `error` | Player ส่ง `{ id: queueItemId, videoId, code? }`; ข้ามเฉพาะเมื่อทั้ง `id` และ `videoId` ตรงกับเพลงปัจจุบัน เหตุการณ์ซ้ำเลื่อนคิวครั้งเดียว |
 | `error` (server → client) | `{ error: "ข้อความ" }` เมื่อไม่มีสิทธิ์หรือ reorder จาก queue เก่า |
 
 `state` เพิ่ม `autoQueue` (boolean) และ `autoQueueStatus` (`idle`, `loading`, `ready`, `unavailable`)
@@ -406,9 +422,11 @@ bun run test
 รวมการเลือกปุ่มด้วยรีโมต, OK, ปุ่มสื่อ และเต็มจอแบบ native/fallback โดยจำลอง DOM และ Fullscreen API
 ไม่แตะ `.env`, queue หรือ settings ของระบบที่กำลังใช้งาน ครอบคลุมการเพิ่มเพลง, sync
 Admin/Player/Guest, reorder, ลบ, clear, play now, play/pause/skip/volume,
-refresh/reconnect, สิทธิ์ผู้ใช้/startup ที่รับเฉพาะรหัสตัวเลข 0–9 อย่างน้อย 4 หลัก, input validation,
+refresh/reconnect, สิทธิ์ผู้ใช้/startup โดยไม่ตั้ง `HOST_PASSWORD`, ตรวจผลบวกในรหัส Player และ input validation,
 คำขอเพลงซ้ำพร้อมกัน และ country/locale ที่ส่งไป YouTube
-รวมหลายห้อง เข้าร่วมพร้อมกันแล้วได้ Admin อัตโนมัติเพียงคนเดียว ให้/ถอน Controller กลับเข้า ปิดห้อง เลขซ้ำ ห้องเต็ม
+รวมหลายห้อง สร้างเลขเดียวกันพร้อมกัน เข้าร่วมพร้อมกันแล้วได้ Admin เพียงคนเดียว
+Controller ให้สิทธิ์ Guest ได้แต่ถอน/แก้ Admin/Player/ข้ามห้องไม่ได้แม้ส่งคำสั่งตรง; Admin ยังถอนสิทธิ์ได้
+Player หลายเครื่อง รายงานจบซ้ำ/ID เก่า ออกเฉพาะแท็บ กลับเข้า ปิดห้อง เลขซ้ำ ห้องเต็ม
 หมดอายุ connection ที่ไม่ตอบ heartbeat คำขอที่ค้างตอนหมดอายุ และ log เฉพาะสร้าง/ลบห้อง
 รวม Auto Queue: แปลงวิดีโอแนะนำทั้ง lockupViewModel/compactVideoRenderer, ตรวจคำขอ WEB ที่ไม่บังคับเสียงอย่างเดียว,
 เตรียมเพลงนอกคิว, ให้คิวหลักมาก่อน, เล่นต่อหลายเพลง,
@@ -417,16 +435,22 @@ refresh/reconnect, สิทธิ์ผู้ใช้/startup ที่รั�
 รวม disconnect ระหว่างเล่น, เล่นคิวต่อขณะ offline, reconnect พร้อมซิงก์เพลงที่จบโดยไม่เล่นซ้ำ,
 เพลงจบระหว่างรอ auth, ห้องหายแล้วรอคิวหมด, และชื่อใหม่เมื่อเปลี่ยน session
 รวมช่องเข้าห้องเดียว, เวลารอ 5 วินาที/HTTP 429, การข้ามแท็บผู้เข้าร่วมที่ถูกซ่อน,
+ลบก่อน/ครบห้าวินาที ยกเลิก หลายเพลงพร้อมกัน คิวเปลี่ยนระหว่างรอ และยกเลิกเมื่อออกจากหน้า/เสียสิทธิ์/หลุดการเชื่อมต่อ,
 เพลงแนะนำใช้ชาร์ตประเทศทุกโหมดโดยไม่มีปุ่มหมวด, การแบ่งผลชาร์ต/สุ่ม/กันซ้ำ/ลองใหม่ และ manifest/ขนาดไอคอน/flow ติดตั้งโดยจำลอง browser events
 
 ตรวจบน browser/TV จริงหลังตั้งค่า:
 
-1. สร้างสองห้อง ตรวจ Player เปิดทันที Scan QR คนแรกในแต่ละห้องต้องเปิดหน้า Admin อัตโนมัติ
+1. สร้างสองห้องด้วย `1236` และ `78924` ตรวจ Player เปิดทันที ทดสอบ `1001`, `99927` และรหัสผลบวกผิด/เลขนอกช่วง
+   เปิดหลายหน้าต่างด้วยรหัสเดียวกันพร้อมกันต้องได้ห้องเดียว Scan QR คนแรกในแต่ละห้องต้องเปิดหน้า Admin อัตโนมัติ
    คนถัดไปต้องเปิดหน้า Guest โดยไม่มีปุ่มรับสิทธิ์ ตรวจว่าคิวไม่ปะปนและ Admin กลับเข้าห้องแล้วคงสิทธิ์เดิม
 2. Guest ค้นหาและเพิ่ม 4 เพลง: เพลงแรกเริ่มเล่น และ Admin เห็นเพลงที่เหลือทันที
-3. ลาก queue บน Admin แล้วตรวจ Guest/Player ว่าแสดงลำดับเดียวกัน
-4. ลบเพลงหนึ่งรายการ แล้วกดเล่นตอนนี้กับเพลงที่รอ: Player ต้องเปลี่ยนเพลง
-5. กดหยุดชั่วคราว/เล่น/ข้าม และปรับเสียง: ตรวจเสียงกับภาพที่ TV
+3. ตรวจไม่มีปุ่มขึ้น/ลงในคิว Admin/Controller ลาก queue แล้วตรวจ Guest/Player ว่าแสดงลำดับเดียวกัน
+4. ลบเพลงแล้วตรวจยังอยู่ในคิวพร้อมนับ 5 → 1 กดยกเลิกก่อนครบเวลาต้องไม่ลบ
+   ลบหลายเพลงแยกเวลา ตรวจคิวอัปเดตไม่เริ่มนับใหม่ และเล่นตอนนี้/เพลงออกจากคิวยกเลิกการลบ
+   ตัดการเชื่อมต่อ ถอนสิทธิ์ หรือออก/รีเฟรชระหว่างรอ แล้วตรวจไม่มีคำสั่งลบตามหลัง
+5. เปิด Player เพิ่มอีกเครื่อง ตรวจเพลงปัจจุบันเริ่มจากต้นโดยเครื่องเดิมยังเล่นต่อ
+   กดหยุดชั่วคราว/เล่น/ข้าม และปรับเสียง: ตรวจเสียงกับภาพทุกเครื่อง รวม autoplay เมื่อเปิดเครื่องใหม่
+   ให้หลายเครื่องรายงานเพลงจบพร้อมกัน ต้องเลื่อนคิวครั้งเดียว
 6. รีเฟรช Admin: เพลง คิว สถานะ pause และ volume ต้องเหมือนเดิม
    ตรวจว่าห้องใหม่เปิดเล่นต่ออัตโนมัติและเวลารอเพิ่มเพลง 5 วินาที ตรวจสถานะทั้งสามหน้าและห้องอื่น กดข้ามจนคิวหลักหมด
    ต้องมีวิดีโออัตโนมัติจากรายการแนะนำ YouTube เล่นต่อ ตรวจภาพและเสียงบน TV
@@ -435,9 +459,11 @@ refresh/reconnect, สิทธิ์ผู้ใช้/startup ที่รั�
 7. ตรวจปุ่มประเภทงานบน Player และล้างคิวบน Admin ถูกซ่อน ไม่มีปุ่มตัวกรอง
    ปุ่มเวลารอแสดงค่าปัจจุบันและเปลี่ยนค่าได้ ตรวจช่องค้นหาบน iPhone และเพลงชื่อยาวไม่ดันปุ่ม + ออกข้างจอ
 8. เปิด Guest/Admin โดยไม่มีห้องต้องเห็นฟอร์มเลขห้อง; WebSocket ไม่มี token ต้องไม่เห็นคิวหรือควบคุมได้
-   ผู้ดูแลหลักให้/ถอน Controller ผ่านรายชื่อ ตรวจ redirect และ Controller ให้สิทธิ์คนอื่นไม่ได้
+   ผู้ดูแลหลักให้/ถอน Controller ผ่านรายชื่อ ตรวจ redirect และ Controller ให้สิทธิ์ Guest ได้
+   Controller ต้องไม่มีปุ่มถอนสิทธิ์/แก้ Admin/Player และส่งคำสั่งตรงหรือข้ามห้องก็ต้องถูกปฏิเสธ
 9. เข้า `/explore` ของห้อง: โหลดชาร์ตประเทศไทยก่อน และยังค้นหาเพลงสากลได้
-   กดออกบน Player ตรวจว่าห้องถูกปิด ทุก Guest/Controller กลับฟอร์มเลขห้อง และ Player กลับหน้าเริ่ม
+   กดออกบน Player ตรวจหยุดเฉพาะเครื่องนั้นและกลับหน้าเริ่ม เครื่องอื่นกับ Guest/Controller ยังอยู่ในห้อง
+   เมื่อทุกคนออกครบหนึ่งชั่วโมงห้องจึงหมดอายุ
 10. ตรวจ Docker ในเครื่องทดสอบ: `docker compose config --quiet` และ
     `docker compose up -d --build` (ต้องมี network `reverseproxy` เดิม)
 11. บน TV Box ตรวจเริ่มเล่นอัตโนมัติ; หาก browser บล็อกเสียง ใช้ปุ่มเล่นเดิม
@@ -454,12 +480,17 @@ refresh/reconnect, สิทธิ์ผู้ใช้/startup ที่รั�
 14. หน้าแรกกรอกเลขห้องเพื่อเข้า Guest และรหัสสร้างเพื่อเปิด Player ตรวจรหัสผิดนับถอยหลัง 5 วินาที
     ลอง Enter ซ้ำระหว่างรอ และตรวจ Guest/Admin ไม่มีปุ่มหมวด “ทั้งหมด” หรือแถวศิลปิน
     สลับทั้งสามโหมดโดยไม่ค้นหา: เพลงแนะนำยังเป็นชาร์ตประเทศ สุ่มและแสดงเพิ่มครั้งละ 5 เพลงได้
-15. ผู้ดูแลหลักมีไอคอนผู้เข้าร่วม; Controller ไม่มีแท็บหรือรายชื่อ และกดลูกศร/Home/End แล้วไม่เลือกแท็บที่ซ่อน
+15. Admin/Controller มีไอคอนผู้เข้าร่วมและสถานะออนไลน์ Guest ไม่ได้รับรายชื่อ
+    ถอนสิทธิ์ Controller แล้วต้องซ่อนแท็บ/รายชื่อและกลับ Guest; ลูกศร/Home/End ไม่เลือกแท็บที่ซ่อน
 16. ผ่าน HTTPS ทดลอง Install บน Chrome desktop/Android และแชร์ → เพิ่มไปยังหน้าจอโฮมบน Safari iOS
     ตรวจไอคอน qp ชื่อคิวเพลิน หน้าต่าง standalone เริ่มที่ `/` และปุ่มติดตั้งซ่อนในแอป
 
 YouTube IFrame อาจจำกัด autoplay/การฝังหรือการเล่นตามประเทศ ต้องตรวจเสียงจริงบน TV/TV Box
 เมื่อใช้งาน Browser automation ที่จำลอง IFrame จะยืนยันได้เฉพาะคำสั่งที่ส่งให้ Player
+
+พักการแก้แถบควบคุม YouTube ค้างเมื่อสลับหน้าต่างบนเครื่องหลายจอ คง iframe และปุ่มเดิม
+ไม่มี API ที่เอกสารระบุสำหรับล้างสถานะ hover โดยตรง และ `autohide` เลิกรองรับแล้ว
+([YouTube Player Parameters](https://developers.google.com/youtube/player_parameters))
 
 ## เครดิตผู้สร้าง
 

@@ -1,26 +1,25 @@
-import { randomInt, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { JukeboxState } from "./state.js";
 
 export const SESSION_TTL_MS = 60 * 60 * 1000;
 
 export class Sessions {
-  constructor(defaults, { now = Date.now, pickCode = () => randomInt(100, 1000), log = console.log } = {}) {
+  constructor(defaults, { now = Date.now, log = console.log } = {}) {
     this.defaults = defaults;
     this.now = now;
-    this.pickCode = pickCode;
     this.log = log;
     this.rooms = new Map();
     this.tokens = new Map();
   }
 
-  create() {
+  create(code) {
     this.prune();
+    if (typeof code !== "string" || code.length !== 3 || !/^[1-9][0-9]{2}$/.test(code)) return null;
+    if (this.rooms.has(code)) return this.rooms.get(code);
     if (this.rooms.size === 900) return null;
-    let code = this.pickCode();
-    while (this.rooms.has(String(code))) code = code === 999 ? 100 : code + 1;
     const room = {
-      code: String(code), id: randomUUID(), state: new JukeboxState(),
-      ...this.defaults, primaryAdminId: null, playerToken: null, onMembersChange: () => {},
+      code, id: randomUUID(), state: new JukeboxState(),
+      ...this.defaults, primaryAdminId: null, onMembersChange: () => {},
       tokens: new Set(), members: new Map(), clients: new Set(), idleSince: this.now(), lastRequestAt: new Map(),
     };
     this.rooms.set(room.code, room);
@@ -46,7 +45,6 @@ export class Sessions {
     room.tokens.add(token);
     this.tokens.set(token, member);
     room.members.set(member.id, member);
-    if (role === "player") room.playerToken = token;
     room.onMembersChange();
     return member;
   }

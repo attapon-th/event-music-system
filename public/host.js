@@ -6,6 +6,7 @@ let playerReady = false;
 let started = false;
 let autoplayBlocked = false;
 let currentVideoId = null;
+let currentItemId = null;
 let playbackTarget = null;
 let appliedPaused = null;
 let latestState = { nowPlaying: null, queue: [] };
@@ -22,6 +23,7 @@ function stopLocalPlayer() {
   clearTimeout(playbackWatchdog);
   if (playerReady && player?.stopVideo) player.stopVideo();
   currentVideoId = null;
+  currentItemId = null;
   appliedPaused = null;
   playbackTarget = null;
   completedOffline = [];
@@ -39,10 +41,10 @@ function reportIfEnded() {
 
 function finishTrack(type, code) {
   const track = latestState.nowPlaying;
-  if (!track || track.videoId !== currentVideoId) return;
-  const report = { type, videoId: track.videoId, code };
+  if (!track || track.id !== currentItemId || track.videoId !== currentVideoId) return;
+  const report = { type, id: track.id, videoId: track.videoId, code };
   if (!recovering && Room.send(report)) {
-    pendingCompletion = { ...report, id: track.id };
+    pendingCompletion = report;
     return;
   }
   pendingCompletion = null;
@@ -158,6 +160,7 @@ function syncPlayer() {
 
   if (!np) {
     currentVideoId = null;
+    currentItemId = null;
     playbackTarget = null;
     appliedPaused = null;
     if (player.stopVideo) player.stopVideo();
@@ -165,8 +168,9 @@ function syncPlayer() {
     return;
   }
   idle.classList.add("hidden");
-  if (np.videoId !== currentVideoId) {
+  if (np.id !== currentItemId || np.videoId !== currentVideoId) {
     currentVideoId = np.videoId;
+    currentItemId = np.id;
     appliedPaused = null;
     playbackTarget = !!latestState.paused;
     player.loadVideoById(np.videoId);
@@ -397,10 +401,7 @@ function wireControls() {
     document.getElementById("qr-toggle").textContent = t(card.hidden ? "showQR" : "hideQR");
     document.getElementById("qr-toggle").setAttribute("aria-pressed", String(card.hidden));
   };
-  document.getElementById("exit-room").onclick = async () => {
-    try { await Room.close(); }
-    catch { document.getElementById("guest-url").textContent = t("roomActionFailed"); }
-  };
+  document.getElementById("exit-room").onclick = () => Room.leave();
   const volEl = document.getElementById("volume");
   const paintVol = () => volEl.style.setProperty("--vol", `${volEl.value}%`);
   paintVol();
@@ -448,6 +449,7 @@ function openPlayer() {
   document.getElementById("qr-toggle").textContent = t("hideQR");
   document.getElementById("qr-toggle").setAttribute("aria-pressed", "false");
   currentVideoId = null;
+  currentItemId = null;
   appliedPaused = null;
   latestState = { nowPlaying: null, queue: [], paused: false, volume: 60 };
   completedOffline = [];

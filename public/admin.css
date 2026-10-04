@@ -15,8 +15,10 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 #queue li { flex-wrap: wrap; border-bottom: 1px solid var(--line); }
 #queue .q-text { min-width: 130px; }
 #queue .q-text .t, #queue .q-text .s { white-space: normal; overflow-wrap: anywhere; }
-.queue-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.queue-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .queue-actions button { width: 44px; height: 44px; padding: 0; display: grid; place-items: center; }
+.queue-actions .cancel-removal { width: auto; padding: 0 12px; }
+.remove-countdown { color: var(--gold); font-size: 14px; }
 .queue-actions button:hover { background: var(--fill-hover); }
 .drag-handle { touch-action: none; cursor: grab; }
 .dragging { background: var(--fill); outline: 2px solid var(--gold); }

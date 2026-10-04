@@ -109,6 +109,8 @@ const UI_MESSAGES = { th: {
   "clear": "ล้างคิว",
   "playNow": "เล่นตอนนี้",
   "remove": "ลบ",
+  "removeCountdown": "ลบใน {seconds} วินาที",
+  "cancelRemoval": "ยกเลิกการลบ",
   "search": "ค้นหาเพลง",
   "add": "เพิ่มเข้าคิว",
   "empty": "ยังไม่มีเพลงในคิว",
