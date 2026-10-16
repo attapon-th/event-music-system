@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#211827" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="คิวเพลิน" />
@@ -13,41 +13,51 @@
   <title data-i18n="Add a Song — Event Music">เพิ่มเพลง — คิวเพลิน</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/music-ui.css?v=20261010-2" />
   <link rel="stylesheet" href="/guest.css" />
   <link rel="stylesheet" href="/session.css" />
 </head>
 <body data-screen="guest">
   <div id="room-content" hidden>
-  <header>
-    <h1 id="request-title">เพิ่มเพลง</h1>
+  <header class="app-header">
+    <div class="brand"><img src="/icons/qp.svg" width="32" height="32" alt="" /><div>
+      <h1 id="request-title"><span data-i18n="Event Music System">คิวเพลิน</span> <span id="nickname-credit" class="nickname"></span></h1>
+      <p id="room-label" class="room-label"></p>
+    </div></div>
+    <div class="header-actions">
+      <p id="connection" class="connection-dot" role="status" aria-live="polite" data-status="connecting" data-i18n-title="connecting" data-i18n-aria-label="connecting"><span class="sr-only" data-i18n="connecting"></span></p>
+    </div>
   </header>
+  <aside class="player-dock" data-i18n-aria-label="nowPlaying">
+    <div id="now-playing" class="now-playing hidden"></div>
+    <p id="auto-queue-status" role="status" aria-live="polite"></p>
+  </aside>
 
-  <div id="now-playing" class="now-playing hidden"></div>
-  <p id="auto-queue-status" role="status" aria-live="polite"></p>
-
-  <div class="page-tabs" role="tablist" aria-label="ค้นหาและคิวเพลง">
+  <div class="page-tabs" role="tablist" data-i18n-aria-label="navigation">
     <button id="search-tab" type="button" role="tab" aria-selected="true" aria-controls="search-panel"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m15.1 15.1 4.4 4.4"/></svg><span data-i18n="Search"></span></button>
     <button id="queue-tab" type="button" role="tab" aria-selected="false" aria-controls="queue-panel" tabindex="-1"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h12"/></svg><span data-i18n="queue"></span></button>
   </div>
 
   <section id="search-panel" role="tabpanel" aria-labelledby="search-tab">
-    <div class="search-modes" role="group" aria-label="โหมดค้นหา" data-i18n-aria-label="searchMode">
-      <button id="mode-videos" type="button" aria-pressed="true" data-i18n="videos"></button>
-      <button id="mode-karaoke" type="button" aria-pressed="false" data-i18n="karaoke"></button>
-      <button id="mode-songs" type="button" aria-pressed="false" data-i18n="songs"></button>
-    </div>
-    <form id="search-form">
+    <form id="search-form" role="search">
       <input id="q" type="search" placeholder="ค้นหาเพลงหรือศิลปิน…" data-i18n-placeholder="Search songs or artists…"
-             autocomplete="off" enterkeyhint="search" />
+             autocomplete="off" enterkeyhint="search" data-i18n-aria-label="Search songs or artists…" />
+      <button id="clear-search" type="button" class="icon-button" data-i18n-title="clearSearch" data-i18n-aria-label="clearSearch" hidden><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
       <button type="submit" id="search-btn" aria-label="ค้นหาเพลง" data-i18n-aria-label="Search">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.3"></circle><path d="M19.5 19.5l-4.3-4.3"></path></svg>
       </button>
     </form>
 
+    <div class="search-modes" role="group" aria-label="โหมดค้นหา" data-i18n-aria-label="searchMode">
+      <button id="mode-songs" type="button" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13M9 9l12-2"/><ellipse cx="6" cy="18" rx="3" ry="3"/><ellipse cx="18" cy="16" rx="3" ry="3"/></svg><span data-i18n="songs"></span></button>
+      <button id="mode-videos" type="button" aria-pressed="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3Z"/></svg><span data-i18n="videos"></span></button>
+      <button id="mode-karaoke" type="button" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg><span data-i18n="karaoke"></span></button>
+    </div>
+
     <section id="suggestions-section">
       <div class="sug-head">
-        <span class="sec-title"><span data-i18n="explore"></span> <small data-i18n="Explore">Explore</small></span>
+        <span class="sec-title"><span data-i18n="explore"></span></span>
         <button id="shuffle" class="shuffle">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7h3.8L16 17.2h4.5"></path><path d="M3.5 17h3.8L10 13"></path><path d="M15.5 7h5"></path><path d="M18.2 4.3L20.5 7l-2.3 2.7"></path><path d="M18.2 14.5l2.3 2.5-2.3 2.7"></path></svg>
           <span data-i18n="Shuffle"></span>
@@ -56,8 +66,8 @@
     </section>
 
     <button id="back-to-explore" class="back-to-explore hidden" data-i18n="Back to Explore">← กลับไปสำรวจเพลง</button>
-    <div id="status" class="status hidden"></div>
-    <ul id="results"></ul>
+    <div id="status" class="status hidden" role="status" aria-live="polite"></div>
+    <ul id="results" data-i18n-aria-label="songResults"></ul>
     <button id="more" class="more hidden">
       <span data-i18n="More songs"></span>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"></path></svg>
@@ -66,12 +76,16 @@
   </section>
 
   <section id="queue-panel" class="queue-section" role="tabpanel" aria-labelledby="queue-tab" hidden>
-    <h2><span data-i18n="queue"></span> <small data-i18n="Up Next">Up Next</small> <span id="queue-count" class="count">0</span></h2>
-    <ul id="queue"></ul>
+    <h2><span data-i18n="queue"></span> <span id="queue-count" class="count">0</span></h2>
+    <ul id="queue" data-i18n-aria-label="queue"></ul>
+    <section id="auto-queue-section" class="auto-queue-section" aria-labelledby="auto-queue-heading" hidden>
+      <h2 id="auto-queue-heading"><span data-i18n="autoQueued"></span> <span id="auto-queue-count" class="count">0</span></h2>
+      <ul id="auto-queue-list" data-i18n-aria-label="autoQueued"></ul>
+    </section>
   </section>
 
   <!-- Toast stack for request feedback (one card per in-flight request) -->
-  <div id="toasts" class="toasts"></div>
+  <div id="toasts" class="toasts" role="status" aria-live="polite" aria-relevant="additions text"></div>
 
   </div>
   <script src="/i18n.js"></script>

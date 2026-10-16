@@ -2,15 +2,14 @@ services:
   event-music:
     image: attap0n/qp:latest
     build: .
-    container_name: event-music
+    container_name: qp
     restart: unless-stopped
 
-    # Join the reverse proxy's network so it can route to this container by name
-    # (event-music:45416). The proxy terminates TLS and serves the public domain.
+    # Traefik terminates TLS and forwards requests over the shared proxy network.
     networks:
-      - reverseproxy
-    expose:
-      - "${PORT:-45416}"
+      - proxy
+    ports:
+      - "${PORT:-45416}:${PORT:-45416}"
 
     env_file:
       - .env
@@ -19,8 +18,8 @@ services:
       DEFAULT_REGION: ${DEFAULT_REGION:-TH}
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-th-TH}
       # Public address the QR code points guests to (your reverse-proxy domain).
-      PUBLIC_URL: ${PUBLIC_URL:-}
+      PUBLIC_URL: ${PUBLIC_URL:-https://${DOMAIN:-qp-attapon-th.github.io}}
 
 networks:
-  reverseproxy:
+  proxy:
     external: true

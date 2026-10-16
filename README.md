@@ -79,6 +79,23 @@ play button. Guests can also scan the QR or join directly at `/guest`.
 > Node ≥ 20 works too (`npm install && npm start`), but Bun is what the Docker
 > image and scripts use.
 
+## Admin และ Guest
+
+ทั้งสองหน้าใช้ `public/music-ui.css` ร่วมกันสำหรับธีมม่วงเข้ม–ทองหม่น รายการเพลง,
+player metadata, search, segmented controls, bottom navigation, empty states และ toasts
+ส่วน `guest.css` และ `admin.css` เก็บรูปแบบเฉพาะสิทธิ์ ใช้ Vanilla JavaScript เดิม ไม่มี framework เพิ่ม
+เมื่อแก้ shared stylesheet ให้เปลี่ยนค่า `?v=` ในทั้งสอง HTML เพื่อป้องกัน browser cache เก่า
+
+- Admin เปิดที่ **คิวเพลง** พร้อม Now Playing และ Play/Pause ตามสถานะจริง, Skip และปุ่มเปิด volume slider
+  เมนู **⋯** มีเล่นตอนนี้, ย้ายขึ้น/ลง และลบ; ลบยังรอ 5 วินาทีและยกเลิกได้ ลากคิวได้เหมือนเดิม
+  Keyboard ใช้ลูกศรในเมนู หรือขึ้น/ลงบน drag handle ได้; Escape/คลิกภายนอกปิดเมนู
+- Settings รูปเฟืองรวม Auto Queue และเวลารอขอเพลง; ล้างคิวยังคงซ่อนตามเงื่อนไขเดิมและมี confirmation
+  ผู้เข้าร่วมและคำสั่งให้/ถอนสิทธิ์ยังแสดงเฉพาะ Admin/Controller ตามสิทธิ์เดิม
+- Guest เปิดที่ **ค้นหา** พร้อมเพลงแนะนำ มี mini player สำหรับดูสถานะ และคิวแบบอ่านอย่างเดียว
+  ช่องค้นหามีปุ่มล้างคำค้น ผลลัพธ์/ตำแหน่ง scroll คงอยู่เมื่อเพิ่มเพลง และป้องกันคำขอเพลงเดียวกันซ้ำระหว่างรอ
+- มือถือใช้ navigation ด้านล่างพร้อม safe area; desktop แยก player และเนื้อหาเป็นสองคอลัมน์
+  API, WebSocket, session/room, YouTube และหน้า Player ใช้ระบบเดิม
+
 ## How it works
 
 ```
@@ -112,7 +129,10 @@ Everything is in memory: queue, history, settings, admission and credentials.
 Rooms expire after the last connection has been gone for 60 minutes. A connected
 idle page keeps its room alive; heartbeat detects dead connections. A restart
 clears every room. Run one server process, with at most 900 concurrent rooms.
-Player credentials use per-tab `sessionStorage`; participant credentials retain
+Active Player credentials use per-tab `sessionStorage`; the browser also remembers its
+last Player room and credential for validation after pressing Start on a future visit.
+Explicit Leave forgets that matching record; expired/replaced rooms require entry again.
+Participant credentials retain
 `localStorage`. Opening another Player never disconnects existing ones, even
 when a duplicated tab shares its credential. **ออก** stops and disconnects only
 that Player page and returns it to welcome; the room and other devices remain.
@@ -157,7 +177,7 @@ Compose builds the image from source and tags it as `attap0n/qp:latest`:
 ```bash
 git clone https://github.com/attapon-th/event-music-system.git
 cd event-music-system
-cp .env.example .env          # set PUBLIC_URL to your domain
+cp .env.example .env          # set DOMAIN and PUBLIC_URL to your domain
 docker compose up -d --build
 ```
 
@@ -168,13 +188,18 @@ docker compose pull
 docker compose up -d --no-build
 ```
 
-The container joins the external `reverseproxy` Docker network and exposes port
-`45416`. Point your reverse proxy at `event-music:45416`, set `PUBLIC_URL` to
-your domain (the QR code guests scan uses it), and make sure the proxy forwards
-**WebSocket upgrades**. All rooms and settings are temporary; no data volume is needed.
+The container joins the external `proxy` Docker network. Traefik's Docker provider
+reads the container labels and routes `https://${DOMAIN}` through the `websecure`
+entrypoint to the app's `PORT` (default `45416`), with TLS certificates managed by
+the `cloudflare` resolver. Traefik must share the `proxy` network and already have
+that entrypoint and resolver configured. Set `DOMAIN` to your hostname without a
+scheme (default `grad-din-music.hangton.net`) and `PUBLIC_URL` to the matching HTTPS
+URL for guest QR codes. In Compose, an empty `PUBLIC_URL` defaults to `https://${DOMAIN}`.
+Traefik forwards **WebSocket upgrades**. All rooms and settings are temporary;
+no data volume is needed.
 
-> The `reverseproxy` network must already exist (it does if your proxy created
-> it). If not: `docker network create reverseproxy`.
+> The `proxy` network must already exist (it does if your proxy created
+> it). If not: `docker network create proxy`.
 
 ### Keeping it updated
 
@@ -220,6 +245,7 @@ commented list). The highlights:
 
 | Variable | What it does |
 |----------|--------------|
+| `DOMAIN` | Traefik hostname in Compose, without a scheme (default `grad-din-music.hangton.net`) |
 | `PUBLIC_URL` | Public address the QR code points to (behind a reverse proxy) |
 | `DEFAULT_REGION` | YouTube search/chart country, fallback `TH` |
 | `DEFAULT_LOCALE` | YouTube language/locale, fallback `th-TH` |
@@ -298,7 +324,11 @@ Player ซ่อน/แสดงการ์ด QR ได้ และแสด�
 ปุ่มประเภทงานบน Player ซ่อนไว้ หน้า `/a` ไม่มีปุ่มตัวกรองและซ่อนปุ่มล้างคิว
 เวลารอเพิ่มเพลงเริ่มต้นที่ **5 วินาที** ปุ่มเวลารอแสดงค่าในปุ่มโดยตรง ไม่มี label การตั้งค่าด้านล่าง
 ปุ่ม **ออก** หยุดเสียงและตัดการเชื่อมต่อเฉพาะ Player หน้านั้น แล้วกลับหน้าเริ่ม ห้องและเครื่องอื่นยังอยู่
-Player เก็บกุญแจใน `sessionStorage` แยกแต่ละแท็บ ผู้เข้าร่วมยังใช้ `localStorage` ตามเดิม
+Player เก็บกุญแจที่ใช้งานใน `sessionStorage` แยกแต่ละแท็บ และจำห้องล่าสุดพร้อม Session ID/กุญแจใน `localStorage`
+เมื่อเปิดหน้าแรกใหม่แล้วกด **เริ่ม** จะตรวจ `/api/info` ก่อนเข้าห้องเดิมโดยไม่ต้องกรอกรหัส
+หากห้องหมดอายุ ถูกลบ หรือเลขห้องถูกใช้ใหม่ จะลืมข้อมูลเดิมและเปิดช่องรหัส โดยไม่สร้างห้องอัตโนมัติ
+เครือข่ายขัดข้องชั่วคราวยังจำห้องไว้เพื่อกดเริ่มลองใหม่ได้ การกด **ออก** ลืมข้อมูลกลับเข้าห้องนั้นโดยไม่ตัด Player อื่น
+ผู้เข้าร่วมยังใช้ `localStorage` ตามเดิม
 
 ข้อมูลทุกห้องอยู่ใน memory ของ server ลบหลังไม่มีอุปกรณ์เชื่อมต่อครบ 60 นาที
 หรือหายเมื่อ restart หน้า Guest/Admin จะแสดงฟอร์มเลขห้องเมื่อห้องหมดอายุ
@@ -344,17 +374,21 @@ Admin/Controller แสดงชื่อเพลง รูป ระยะเ�
 
 ปุ่ม **เล่นต่ออัตโนมัติ: เปิด/ปิด** อยู่บน Player และ Admin; Controller ใช้ได้ด้วย
 ห้องใหม่เริ่มต้นเป็นเปิด และ Guest เห็นสถานะโดยเปลี่ยนค่าไม่ได้ เมื่อเปิดและคิวหลักว่าง
-ระบบเตรียมวิดีโอแนะนำจาก YouTube ปกติตามคลิปล่าสุดไว้หนึ่งคลิปแยกจากคิวหลัก โดยไม่ขึ้นกับโหมดค้นหา
+ระบบเตรียมวิดีโอแนะนำจาก YouTube ปกติตามคลิปล่าสุดเป็นชุดละสูงสุด **5 เพลง** แยกจากคิวหลัก โดยไม่ขึ้นกับโหมดค้นหา
+เรียงตาม YouTube โดยไม่สุ่ม ดึง Recommendations ครั้งเดียวต่อชุด เล่น/ข้ามจนเพลงสุดท้ายจบแล้วจึงดึงชุดใหม่จากเพลงล่าสุด
 แล้วเล่นต่อเมื่อเพลงปัจจุบันจบ หากยังไม่เคยมีเพลง จะรอผู้ใช้เพิ่มเพลงแรก
 เลือกตามลำดับแนะนำ ตัดรายการซ้ำ ไลฟ์/ระยะเวลาไม่ทราบ และคลิปยาวเกิน 10 นาที พร้อมตรวจการเล่นได้
 คลิปเพลงภาพนิ่งยังเล่นได้หาก YouTube แนะนำมา; ระบบใช้รายการแนะนำปกติโดยไม่บังคับเสียงอย่างเดียว
 เพลงอัตโนมัติแสดงคำว่า **เพลงอัตโนมัติ** บนทุกหน้าจอ และคิวหลักยังนับเฉพาะคำขอของผู้ใช้
-หากมีคนเพิ่มเพลงขณะเพลงอัตโนมัติเล่นอยู่ เพลงปัจจุบันจะเล่นจบก่อน แล้วเล่นคิวหลักตามลำดับ
+Admin/Guest แสดงรายการอัตโนมัติที่รอเล่นพร้อมจำนวน แยกใต้คิวหลักและไม่มีปุ่มจัดการ
+เมื่อเพิ่มเพลงสำเร็จ ล้างรายการอัตโนมัติที่รอและยกเลิกผลลัพธ์ที่กำลังโหลดทันที
+หากเพลงอัตโนมัติเล่นอยู่ เพลงปัจจุบันจะเล่นจบก่อน แล้วเล่นคิวหลักตามลำดับ และเตรียมชุดใหม่จากเพลงสุดท้ายของคิวผู้ใช้
 ปิดปุ่มแล้วเพลงปัจจุบันเล่นต่อ แต่จะไม่เลือกเพลงอัตโนมัติถัดไป รีเฟรชหน้ายังคงค่าของห้อง
 
 Auto Queue ใช้ประเทศ/ภาษาจาก `DEFAULT_REGION`/`DEFAULT_LOCALE` และไม่ใช้บัญชี YouTube ของผู้ฟัง
 ตัดเพลงซ้ำกับเพลงปัจจุบัน คิวหลัก และประวัติ 100 เพลงล่าสุด รวมทั้งรายการที่ไม่ทราบความยาวหรือเกิน 10 นาที
-ตรวจความพร้อมเล่นสูงสุด 3 เพลงต่อครั้ง หากโหลดไม่ได้หรือไม่มีเพลงที่เหมาะสม จะแสดงข้อความและหยุดรอ
+ตรวจความพร้อมเล่นสูงสุด 20 รายการจากผลตอบกลับเดิมจนได้ 5 เพลง หากได้ไม่ครบใช้จำนวนจริง
+หากโหลดไม่ได้หรือไม่มีเพลงที่เหมาะสม จะแสดงข้อความและหยุดรอ
 หากเพลงอัตโนมัติเล่นไม่ได้ติดกัน 3 เพลง ระบบหยุดลองต่อ ผู้ใช้เริ่มรอบใหม่ได้ด้วยการปิด/เปิดปุ่มหรือเพิ่มเพลงใหม่
 YouTube Music ใช้ endpoint ภายในซึ่งอาจเปลี่ยนรูปแบบได้; เมื่อหาเพลงต่อไม่ได้ คิวที่ผู้ใช้เพิ่มยังทำงานตามปกติ
 
@@ -407,7 +441,9 @@ Player เพิ่ม `completed: [{ id, videoId, failed: boolean }]` ใน `a
 | `error` (server → client) | `{ error: "ข้อความ" }` เมื่อไม่มีสิทธิ์หรือ reorder จาก queue เก่า |
 
 `state` เพิ่ม `autoQueue` (boolean) และ `autoQueueStatus` (`idle`, `loading`, `ready`, `unavailable`)
-`nowPlaying.autoQueued: true` ระบุเพลงอัตโนมัติ เพลงที่เตรียมไว้ไม่รวมอยู่ใน `state.queue`
+`nowPlaying.autoQueued: true` ระบุเพลงอัตโนมัติ และ `state.autoQueueItems` เป็นรายการ metadata เพลงอัตโนมัติที่รอเล่น
+สูงสุด 5 เพลง เรียงตาม YouTube (`videoId`, `title`, `channel`, `duration`, `thumbnail`, `autoQueued: true`)
+รายการนี้ไม่รวมใน `state.queue` และจะได้ queue item ID เมื่อถูกเลือกเป็น Now Playing
 
 ### ทดสอบ
 
@@ -438,13 +474,30 @@ Player หลายเครื่อง รายงานจบซ้ำ/ID �
 ลบก่อน/ครบห้าวินาที ยกเลิก หลายเพลงพร้อมกัน คิวเปลี่ยนระหว่างรอ และยกเลิกเมื่อออกจากหน้า/เสียสิทธิ์/หลุดการเชื่อมต่อ,
 เพลงแนะนำใช้ชาร์ตประเทศทุกโหมดโดยไม่มีปุ่มหมวด, การแบ่งผลชาร์ต/สุ่ม/กันซ้ำ/ลองใหม่ และ manifest/ขนาดไอคอน/flow ติดตั้งโดยจำลอง browser events
 
+เพิ่ม browser regression suite แบบเลือกเรียก ใช้ Chromium ที่ติดตั้งพร้อม system libraries อยู่แล้ว:
+
+```bash
+# ค้นหา Chromium ใน /usr/bin หรือ Playwright cache ให้อัตโนมัติ หรือระบุเอง
+BROWSER_BIN=/path/to/chromium node scripts/test-browser.mjs
+```
+
+ใช้ dependency `ws` เดิมคุยกับ Chrome DevTools; ไม่เพิ่ม Playwright/runtime dependency
+รัน server/room ชั่วคราวและ browser contexts แยกกัน ใช้ API/WebSocket จริง
+จำลองเฉพาะบริการ YouTube และ thumbnail ใน fixture ไม่ใช้ mock UI state
+ตรวจ 320/375/768/1440px, overflow, 44px targets, touch, keyboard, modal focus,
+play/pause/skip/volume, move/drag/Play Now, ลบ/ยกเลิก, ค้นหา/โหมด/แบ่งหน้า/สุ่ม/ล้าง,
+error/empty/duplicate/cooldown, scroll, nickname, role redirects, reconnect และ reduced motion
+บันทึกภาพใน `/tmp/music-ui-screenshots` หรือ directory ที่ระบุด้วย `BROWSER_ARTIFACTS`
+ยังต้องตรวจเสียง YouTube และ Safari/iPhone/TV Box จริงตาม checklist ด้านล่าง
+
 ตรวจบน browser/TV จริงหลังตั้งค่า:
 
 1. สร้างสองห้องด้วย `1236` และ `78924` ตรวจ Player เปิดทันที ทดสอบ `1001`, `99927` และรหัสผลบวกผิด/เลขนอกช่วง
    เปิดหลายหน้าต่างด้วยรหัสเดียวกันพร้อมกันต้องได้ห้องเดียว Scan QR คนแรกในแต่ละห้องต้องเปิดหน้า Admin อัตโนมัติ
    คนถัดไปต้องเปิดหน้า Guest โดยไม่มีปุ่มรับสิทธิ์ ตรวจว่าคิวไม่ปะปนและ Admin กลับเข้าห้องแล้วคงสิทธิ์เดิม
 2. Guest ค้นหาและเพิ่ม 4 เพลง: เพลงแรกเริ่มเล่น และ Admin เห็นเพลงที่เหลือทันที
-3. ตรวจไม่มีปุ่มขึ้น/ลงในคิว Admin/Controller ลาก queue แล้วตรวจ Guest/Player ว่าแสดงลำดับเดียวกัน
+3. ตรวจแถวคิว Admin/Controller มี drag handle และปุ่ม ⋯ เพียงปุ่มเดียว; เล่นตอนนี้/ย้ายขึ้น/ลง/ลบอยู่ในเมนู
+   ลาก queue แล้วตรวจ Guest/Player ว่าแสดงลำดับเดียวกัน และตรวจ Escape/คลิกภายนอกปิดเมนู
 4. ลบเพลงแล้วตรวจยังอยู่ในคิวพร้อมนับ 5 → 1 กดยกเลิกก่อนครบเวลาต้องไม่ลบ
    ลบหลายเพลงแยกเวลา ตรวจคิวอัปเดตไม่เริ่มนับใหม่ และเล่นตอนนี้/เพลงออกจากคิวยกเลิกการลบ
    ตัดการเชื่อมต่อ ถอนสิทธิ์ หรือออก/รีเฟรชระหว่างรอ แล้วตรวจไม่มีคำสั่งลบตามหลัง
@@ -465,7 +518,7 @@ Player หลายเครื่อง รายงานจบซ้ำ/ID �
    กดออกบน Player ตรวจหยุดเฉพาะเครื่องนั้นและกลับหน้าเริ่ม เครื่องอื่นกับ Guest/Controller ยังอยู่ในห้อง
    เมื่อทุกคนออกครบหนึ่งชั่วโมงห้องจึงหมดอายุ
 10. ตรวจ Docker ในเครื่องทดสอบ: `docker compose config --quiet` และ
-    `docker compose up -d --build` (ต้องมี network `reverseproxy` เดิม)
+    `docker compose up -d --build` (ต้องมี network `proxy` ร่วมกับ Traefik)
 11. บน TV Box ตรวจเริ่มเล่นอัตโนมัติ; หาก browser บล็อกเสียง ใช้ปุ่มเล่นเดิม
     เลื่อนด้วยลูกศรไปเล่น/ข้าม/เสียง/ลบเพลง
     กรอบโฟกัสต้องเห็นชัดและยังอยู่เมื่อคิวอัปเดต เข้าเต็มจอแล้วปุ่มเต็มจอต้องซ่อน
@@ -503,3 +556,7 @@ Repository ของเวอร์ชันนี้: [attapon-th/event-music-s
 ## License
 
 [MIT](LICENSE) — party responsibly. 🎉
+
+การทดสอบเพิ่มเติม: ปิดแท็บ Player แล้วเปิดหน้าแรกใหม่ กดเริ่มเพื่อกลับห้องเดิม; กดออกแล้วต้องกรอกรหัส
+ปิดห้องแล้วสร้างเลขเดิมใหม่ต้องไม่กลับเข้า Session ใหม่ด้วยสิทธิ์เก่า ตรวจลิสต์ Auto Queue ชุดละ 5 เพลง
+ทั้ง Admin/Guest และการล้างรายการทันทีเมื่อเพิ่มเพลงสำเร็จ

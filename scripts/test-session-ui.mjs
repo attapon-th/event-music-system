@@ -228,6 +228,11 @@ assert.equal(controller.run("Room.send({type:'pause'})"), true);
 controller.sockets[1].onmessage({ data: JSON.stringify({ type: "state", role: "guest", primaryAdminId: "owner" }) });
 assert.match(controller.location.href, /^\/guest\?room=123/);
 
+const rejectedRequest = page("guest", "?room=123&session=room-id", new Map(), path => path === "/api/request"
+  ? { status: 400, data: { ok: false, reason: "ข้อมูลเพลงไม่ถูกต้อง" } } : { data: member });
+await rejectedRequest.run("Room.ready");
+await assert.rejects(rejectedRequest.run("Room.fetch('/api/request', {method:'POST',body:'{}'})"), /ข้อมูลเพลงไม่ถูกต้อง/, "Request validation reasons survive the shared HTTP error handler");
+
 const expired = page("guest", "?room=123&session=old-id", new Map(), (_path, body) => body.sessionId
   ? { status: 410, data: { error: "ห้องหมดอายุ" } } : { data: member });
 assert.equal(await expired.run("Room.ready"), false);
@@ -291,7 +296,7 @@ for (const tab of players) {
   await tab.nodes.get("room-create").onsubmit({ preventDefault() {} });
   tab.run("Room.connect({onEnd() { globalThis.ended = true; }})");
 }
-assert.equal(sharedStorage.has(playerKey), false, "Player credentials are never shared through localStorage");
+assert.equal(sharedStorage.has(playerKey), false, "Active Player credentials remain in tab storage");
 assert.equal(tabs[0].get(playerKey), "player-0");
 assert.equal(tabs[1].get(playerKey), "player-1");
 const refreshed = page("player", "?room=123&session=room-id", sharedStorage, (_path, _body, headers) => {
@@ -308,4 +313,91 @@ assert.equal(tabs[1].get(playerKey), "player-1", "Leaving one tab retains other 
 assert.equal(players[1].sockets[0].readyState, 1);
 assert.equal(players[0].history.url, "/");
 assert.equal(players[0].nodes.get("start-btn").hidden, false);
-console.log("PASS: Player checksum entry/retry/tab storage/local leave, automatic Admin and Guest admission, role redirects, reconnect, room expiry (DOM simulated).");
+// A new tab/browser remembers only the last room, and validates it after Start.
+const resumeRecord = { code: "123", sessionId: "room-id", token: "player-remembered" };
+const resumeStorage = () => new Map([["music-last-player", JSON.stringify(resumeRecord)]]);
+const persisted = resumeStorage();
+const resumeTab = new Map();
+const returning = page("player", "", persisted, (path, body, headers) => {
+  assert.equal(path, "/api/info", "resume validates without creating a room");
+  assert.equal(body, undefined);
+  assert.equal(headers.Authorization, "Bearer player-remembered");
+  assert.equal(headers["X-Session-Id"], "room-id");
+  return { data: { ...member, ...resumeRecord, role: "player" } };
+}, resumeTab);
+assert.equal(await returning.run("Room.ready"), false);
+assert.equal(returning.requests.length, 0, "do not resume before the Start gesture");
+returning.run("Room.onJoined = () => { globalThis.opened = true; }");
+await returning.nodes.get("start-btn").onclick();
+assert.equal(returning.run("opened"), true);
+assert.equal(returning.nodes.get("room-content").hidden, false);
+assert.equal(returning.nodes.get("room-create").hidden, true);
+assert.equal(resumeTab.get(playerKey), resumeRecord.token);
+assert.deepEqual(JSON.parse(persisted.get("music-last-player")), resumeRecord, "never persist the entered checksum code");
+returning.run("Room.leave()");
+assert.equal(persisted.has("music-last-player"), false);
+assert.equal(resumeTab.has(playerKey), false);
+await returning.nodes.get("start-btn").onclick();
+assert.equal(returning.requests.length, 1, "explicit Leave makes the next Start reveal entry");
+assert.equal(returning.nodes.get("room-create").hidden, false);
+
+for (const data of [null, { ...member, ...resumeRecord, sessionId: "replacement", role: "player" },
+    { ...member, ...resumeRecord, role: "guest" }, { ...member, ...resumeRecord, code: "456", role: "player" }]) {
+  const staleStorage = resumeStorage();
+  const stale = page("player", "", staleStorage, () => data
+    ? { data } : { status: 401, data: { code: "SESSION_INVALID", error: "ห้องหมดอายุ" } });
+  await stale.run("Room.ready");
+  await stale.nodes.get("start-btn").onclick();
+  assert.equal(staleStorage.has("music-last-player"), false, "reject expired, replaced, wrong-role or mismatched rooms");
+  assert.equal(stale.nodes.get("room-create").hidden, false);
+  assert.equal(stale.nodes.get("room-content").hidden, true);
+  assert.equal(stale.requests.length, 1, "never create a replacement room automatically");
+}
+for (const search of ["?room=456", "?room=123&session=replacement"]) {
+  const other = page("player", search, resumeStorage(), () => { throw new Error("must not resume another room"); });
+  await other.run("Room.ready");
+  await other.nodes.get("start-btn").onclick();
+  assert.equal(other.requests.length, 0);
+  assert.equal(other.nodes.get("room-create").hidden, false);
+}
+for (const record of ["not-json", JSON.stringify({code:"123",sessionId:"room-id"})]) {
+  const malformedStorage = new Map([["music-last-player", record]]);
+  const malformed = page("player", "", malformedStorage, () => { throw new Error("invalid remembered record must not reach the server"); });
+  await malformed.run("Room.ready");
+  await malformed.nodes.get("start-btn").onclick();
+  assert.equal(malformedStorage.has("music-last-player"), false);
+  assert.equal(malformed.nodes.get("room-create").hidden, false);
+}
+const serverDownStorage = resumeStorage();
+const serverDown = page("player", "", serverDownStorage, () => ({status:503, data:{error:"ลองใหม่ภายหลัง"}}));
+await serverDown.run("Room.ready");
+await serverDown.nodes.get("start-btn").onclick();
+assert.equal(serverDownStorage.has("music-last-player"), true);
+assert.equal(serverDown.nodes.get("start-btn").hidden, false);
+let releaseResume;
+const networkStorage = resumeStorage();
+let networkDown = true;
+const retrying = page("player", "", networkStorage, async () => {
+  if (networkDown) {
+    await new Promise(resolve => { releaseResume = resolve; });
+    throw new Error("Network unavailable");
+  }
+  return { data: { ...member, ...resumeRecord, role: "player" } };
+});
+await retrying.run("Room.ready");
+const pendingResume = retrying.nodes.get("start-btn").onclick();
+assert.equal(retrying.nodes.get("start-btn").disabled, true);
+await retrying.nodes.get("start-btn").onclick();
+assert.equal(retrying.requests.length, 1, "prevent duplicate resume requests while checking");
+releaseResume();
+await pendingResume;
+assert.equal(networkStorage.has("music-last-player"), true, "temporary outages retain the last room");
+assert.equal(retrying.nodes.get("room-error").textContent, "การเชื่อมต่อขัดข้อง กรุณาลองใหม่");
+assert.equal(retrying.nodes.get("start-btn").disabled, false);
+assert.equal(retrying.nodes.get("start-btn").hidden, false);
+networkDown = false;
+await retrying.nodes.get("start-btn").onclick();
+assert.equal(retrying.nodes.get("room-content").hidden, false);
+assert.equal(retrying.requests.length, 2);
+assert.equal(JSON.parse(sharedStorage.get("music-last-player")).token, "player-1", "leaving another tab cannot erase the latest Player record");
+console.log("PASS: Player entry/retry, tab credentials, persistent room resume/expiry/replacement/network retry/local leave, Admin and Guest admission, redirects and reconnect (DOM simulated).");

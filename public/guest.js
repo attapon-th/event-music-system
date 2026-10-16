@@ -10,7 +10,7 @@ const backToExploreBtn = document.getElementById("back-to-explore");
 // Shared tabs keep both panels mounted so search and live queue survive switching.
 const pageTabs = [document.getElementById("search-tab"), document.getElementById("queue-tab")];
 const pagePanels = ["search-panel", "queue-panel"];
-let activePageTab = 0;
+let activePageTab = document.body.dataset.admin === "true" ? 1 : 0;
 if (document.body.dataset.admin === "true") {
   pageTabs.push(document.getElementById("participants-tab"));
   pagePanels.push("participants-panel");
@@ -40,13 +40,16 @@ pageTabs.forEach((tab, index) => {
   tab.onkeydown = (event) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
-    const visible = pageTabs.map((tab, i) => tab.hidden ? -1 : i).filter(i => i >= 0);
+    const order = document.body.dataset.admin === "true" ? [1, 0, 2] : [0, 1];
+    const visible = order.filter(i => !pageTabs[i].hidden);
     const next = event.key === "Home" ? visible[0] : event.key === "End" ? visible.at(-1)
       : visible[(visible.indexOf(index) + (event.key === "ArrowLeft" ? -1 : 1) + visible.length) % visible.length];
     selectPageTab(next);
     pageTabs[next].focus();
   };
 });
+
+selectPageTab(activePageTab);
 
 let searchMode = "videos";
 const searchModes = ["videos", "karaoke", "songs"];
@@ -61,6 +64,13 @@ function selectSearchMode(mode) {
 searchModes.forEach((mode) => {
   document.getElementById(`mode-${mode}`).onclick = () => selectSearchMode(mode);
 });
+
+const clearSearchBtn = document.getElementById("clear-search");
+function updateClearSearch() { clearSearchBtn.hidden = !qEl.value; }
+qEl.addEventListener("input", updateClearSearch);
+clearSearchBtn.onclick = () => { backToExplore(); qEl.focus(); };
+// Native search-field clearing restores Explore as well.
+qEl.addEventListener("search", () => { if (!qEl.value) backToExplore(); });
 
 // ---- Explore (country chart) -----------------------------------------
 const moreBtn = document.getElementById("more");
@@ -82,6 +92,7 @@ async function startBrowse() {
   resultsEl.innerHTML = "";
   moreBtn.classList.add("hidden");
   moreBtn.disabled = true;
+  resultsEl.setAttribute("aria-busy", "true");
   setStatus(t("Loading songs…"));
   try {
     const res = await fetch("/api/browse?q=__hits");
@@ -100,7 +111,7 @@ async function startBrowse() {
   } catch (err) {
     if (browse.gen === gen) setStatus("😕 " + err.message);
   } finally {
-    if (browse.gen === gen) moreBtn.disabled = false;
+    if (browse.gen === gen) { moreBtn.disabled = false; resultsEl.setAttribute("aria-busy", "false"); }
   }
 }
 
@@ -123,6 +134,8 @@ async function doSearch(q) {
   sugSection.classList.add("hidden"); // hide explore once searching
   moreBtn.classList.add("hidden");
   backToExploreBtn.classList.remove("hidden");
+  updateClearSearch();
+  resultsEl.setAttribute("aria-busy", "true");
   setStatus(t("Searching…"));
   try {
     const res = await fetch("/api/search?q=" + encodeURIComponent(q) + "&mode=" + searchMode);
@@ -133,7 +146,7 @@ async function doSearch(q) {
   } catch (err) {
     if (browse.gen === gen) setStatus("😕 " + err.message);
   } finally {
-    if (browse.gen === gen) moreBtn.disabled = false;
+    if (browse.gen === gen) { moreBtn.disabled = false; resultsEl.setAttribute("aria-busy", "false"); }
   }
 }
 
@@ -143,6 +156,7 @@ function backToExplore() {
   browse.pending = [];
   moreBtn.classList.add("hidden");
   qEl.value = "";
+  updateClearSearch();
   resultsEl.innerHTML = "";
   setStatus("");
   backToExploreBtn.classList.add("hidden");
@@ -165,15 +179,19 @@ const NO_THUMB = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%
 function resultCard(r) {
   const li = document.createElement("li");
   li.innerHTML = `
-    <img src="${r.thumbnail || NO_THUMB}" alt="" loading="lazy" />
+    <img src="${NO_THUMB}" alt="" loading="lazy" />
     <div class="r-meta">
       <div class="r-title"></div>
       <div class="r-sub"></div>
     </div>
     <button class="add-btn" title="${t("Add")}">+</button>`;
+  li.querySelector("img").src = r.thumbnail || NO_THUMB;
   li.querySelector(".r-title").textContent = r.title;
-  li.querySelector(".r-sub").textContent = r.channel + (r.duration ? ` · ${r.duration}` : "");
+  li.querySelector(".r-sub").textContent = (r.channel || "") + (r.duration ? ` · ${r.duration}` : "");
   const btn = li.querySelector(".add-btn");
+  btn.setAttribute("aria-label", t("addSong", { title: r.title }));
+  btn.dataset.videoId = r.videoId;
+  if (pendingRequests.has(r.videoId)) { btn.disabled = true; btn.textContent = "…"; }
   btn.onclick = () => requestSong(r, btn);
   return li;
 }
@@ -228,8 +246,9 @@ function initNickname() {
     ? savedNickname : choices[Math.floor(Math.random() * choices.length)];
   localStorage.setItem(key, nickname);
   localStorage.setItem("guestNickname", nickname);
-  document.getElementById("request-title").textContent = t("addSongBy", { nickname });
+  document.getElementById("nickname-credit").textContent = t("nicknameCredit", { nickname });
   document.title = t("addSongBy", { nickname });
+  document.getElementById("room-label").textContent = t("roomCode", { code: Room.code });
 }
 
 // ---- Own requests (for the "YOU" badge in the queue) -------------------
@@ -246,12 +265,14 @@ function rememberMyRequest(id) {
 }
 
 // ---- Request a song ---------------------------------------------------
+const pendingRequests = new Set();
 async function requestSong(song, btn) {
+  if (btn.disabled || pendingRequests.has(song.videoId)) return;
+  pendingRequests.add(song.videoId);
+  let added = false;
+  btn.setAttribute("aria-busy", "true");
   btn.disabled = true;
   btn.textContent = "…";
-  // Persistent, animated "checking" card — with the web-searching filter a
-  // verdict can take 5–20s, so it must read as activity, not a frozen toast.
-  // Subline names the song: several checks can be in flight at once.
   const notice = toast("info", "🔎", t("Checking song…"), { persist: true, sub: song.title, checking: true });
   try {
     const data = await Room.fetch("/api/request", {
@@ -260,9 +281,9 @@ async function requestSong(song, btn) {
       body: JSON.stringify({ ...song, name: nickname, clientId }),
     });
     if (data.ok) {
+      added = true;
       const main = data.position === 0 ? t("Added — now playing") : t("position", { position: data.position });
-      const sub = data.position === 0 ? t("Added — playing now!") : t("position", { position: data.position });
-      notice.set("ok", "✓", main, { sub });
+      notice.set("ok", "✓", main, { sub: song.title });
       btn.textContent = "✓";
       if (data.id) {
         rememberMyRequest(data.id);
@@ -282,16 +303,24 @@ async function requestSong(song, btn) {
       btn.textContent = "+";
     }
   } catch (err) {
-    notice.set("bad", "⚠️", t("Network error. Please try again."), { sub: t("Network error. Try again.") });
+    if (err.retryIn) { notice.dismiss(); cooldownToast(err.retryIn); }
+    else notice.set("bad", "!", err.status ? err.message : t("Network error. Please try again."));
     btn.disabled = false;
     btn.textContent = "+";
+  } finally {
+    pendingRequests.delete(song.videoId);
+    btn.setAttribute("aria-busy", "false");
+    // A shuffle or new search may have replaced the button during its request.
+    for (const button of resultsEl.querySelectorAll(".add-btn")) {
+      if (button.dataset.videoId !== song.videoId) continue;
+      button.disabled = added;
+      button.textContent = added ? "✓" : "+";
+      button.setAttribute("aria-busy", "false");
+    }
   }
 }
 
-// Stacking toasts: each card is its own element (icon circle + Thai main
-// line + smaller English subline). toast() returns a handle whose set() morphs
-// the card in place — a request's "checking…" card becomes its own verdict —
-// so parallel requests never clobber each other's feedback.
+// Each request keeps its own checking/result notice, capped at three cards.
 const MAX_TOASTS = 3;
 
 function toast(kind, icon, main, opts = {}) {
@@ -308,7 +337,10 @@ function toast(kind, icon, main, opts = {}) {
       el.innerHTML = `
         <span class="toast-ico"></span>
         <div><div class="toast-main"></div><div class="toast-sub"></div></div>`;
-      el.querySelector(".toast-ico").textContent = icon2;
+      const glyph = kind2 === "ok" ? '<path d="m5 12 4 4L19 6"/>'
+        : kind2 === "bad" ? '<circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 3h.01"/>'
+        : '<path d="M21 12a9 9 0 1 1-9-9"/>';
+      el.querySelector(".toast-ico").innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${glyph}</svg>`;
       el.querySelector(".toast-main").textContent = main2;
       const subEl = el.querySelector(".toast-sub");
       if (sub) subEl.textContent = sub;
@@ -337,7 +369,7 @@ function cooldownToast(seconds) {
   const notice = cooldownToast._h;
   let left = seconds;
   const draw = () =>
-    notice.set("bad", "⏳", t("wait", { seconds: left }), { persist: true, sub: t("wait", { seconds: left }) });
+    notice.set("bad", "⏳", t("wait", { seconds: left }), { persist: true });
   draw();
   cooldownToast._i = setInterval(() => {
     left--;
@@ -352,37 +384,77 @@ function cooldownToast(seconds) {
 let lastQueueState = null; // kept so the You badge can re-render after an add
 
 function connectWs() {
-  Room.connect({ onState(msg) {
-    lastQueueState = msg.state;
-    renderQueue(msg.state);
-  } });
+  setConnectionStatus("connecting");
+  Room.connect({
+    onAuth() { setConnectionStatus("connected"); },
+    onState(msg) { lastQueueState = msg.state; renderQueue(msg.state); },
+    onOffline() { setConnectionStatus("offline"); },
+    onEnd() { setConnectionStatus("offline"); },
+  });
 }
 
-function renderQueue(state) {
+function setConnectionStatus(status) {
+  const el = document.getElementById("connection");
+  el.dataset.status = status;
+  el.title = t(status);
+  el.setAttribute("aria-label", t(status));
+  el.innerHTML = '<span class="sr-only"></span>';
+  el.querySelector("span").textContent = t(status);
+}
+
+function songMeta(item, requesterFirst = false) {
+  const requester = [item.autoQueued && t("autoQueued"), item.addedBy && t("requester", { name: item.addedBy })].filter(Boolean).join(" · ");
+  return (requesterFirst ? [requester, item.channel, item.duration] : [item.channel, item.duration, requester]).filter(Boolean).join(" · ");
+}
+
+function renderAutoQueue(state) {
+  const items = state.autoQueue ? state.autoQueueItems || [] : [];
+  document.getElementById("queue-panel").classList.toggle("has-auto-queue", items.length > 0);
+  document.getElementById("auto-queue-section").hidden = items.length === 0;
+  document.getElementById("auto-queue-count").textContent = items.length;
+  const list = document.getElementById("auto-queue-list");
+  list.innerHTML = "";
+  items.forEach((item, index) => {
+    const row = document.createElement("li");
+    row.innerHTML = `<span class="q-num">${index + 1}</span><img src="${NO_THUMB}" alt="" loading="lazy" /><div class="q-text"><div class="t"></div><div class="s"></div></div>`;
+    row.querySelector("img").src = item.thumbnail || NO_THUMB;
+    row.querySelector(".t").textContent = item.title;
+    row.querySelector(".s").textContent = songMeta(item);
+    list.appendChild(row);
+  });
+}
+
+function renderNowPlaying(state) {
+  renderAutoQueue(state);
   const autoQueueStatus = document.getElementById("auto-queue-status");
-  autoQueueStatus.textContent = document.body.dataset.admin === "true" ? autoQueueMessage(state)
+  autoQueueStatus.textContent = document.body.dataset.admin === "true"
+    ? [state.autoQueue && t("autoQueueEnabled"), autoQueueMessage(state)].filter(Boolean).join(" · ")
     : [t("autoQueue", { state: t(state.autoQueue ? "On" : "Off") }), autoQueueMessage(state)].filter(Boolean).join(" · ");
   const np = state.nowPlaying;
   const npEl = document.getElementById("now-playing");
-  if (np) {
-    npEl.classList.remove("hidden");
-    npEl.innerHTML = `
-      <img src="${np.thumbnail || NO_THUMB}" alt="" />
-      <div class="np-body">
-        <div class="np-label">
-          <span class="eq"><span></span><span></span><span></span></span>
-          ${t("nowPlaying")}
-        </div>
-        <div class="np-title"></div>
-        <div class="np-sub"></div>
-      </div>`;
-    npEl.querySelector(".np-title").textContent = np.title;
-    npEl.querySelector(".np-sub").textContent =
-      [np.channel, np.autoQueued && t("autoQueued"), np.addedBy && t("requester", { name: np.addedBy })].filter(Boolean).join(" · ");
-  } else {
-    npEl.classList.add("hidden");
-  }
+  npEl.classList.remove("hidden");
+  npEl.classList.toggle("paused", !!state.paused);
+  if (!np) { npEl.textContent = t("idle"); return; }
+  npEl.innerHTML = `
+    <img src="${NO_THUMB}" alt="" />
+    <div class="np-body">
+      <div class="np-label">
+        <span class="eq" aria-hidden="true"><span></span><span></span><span></span></span>
+        ${t(state.paused ? "pause" : "nowPlaying")}
+      </div>
+      <div class="np-title"></div>
+      <div class="np-sub"><span class="np-channel"></span> <span class="np-requester"></span></div>
+    </div>`;
+  npEl.querySelector("img").src = np.thumbnail || NO_THUMB;
+  npEl.querySelector(".np-title").textContent = np.title;
+  npEl.querySelector(".np-title").title = np.title;
+  npEl.querySelector(".np-channel").textContent = [np.channel, np.duration].filter(Boolean).join(" · ");
+  npEl.querySelector(".np-requester").textContent = [np.autoQueued && t("autoQueued"), np.addedBy && t("requester", { name: np.addedBy })].filter(Boolean).join(" · ");
+  npEl.querySelector(".np-sub").title = songMeta(np);
+}
 
+function renderQueue(state) {
+  renderNowPlaying(state);
   const queue = state.queue || [];
   document.getElementById("queue-count").textContent = queue.length;
   const ul = document.getElementById("queue");
@@ -396,10 +468,12 @@ function renderQueue(state) {
     const li = document.createElement("li");
     li.innerHTML = `
       <span class="q-num">${i + 1}</span>
-      <img src="${item.thumbnail || NO_THUMB}" alt="" loading="lazy" />
+      <img src="${NO_THUMB}" alt="" loading="lazy" />
       <div class="q-text"><div class="t-row"><span class="t"></span></div><div class="s"></div></div>`;
+    li.querySelector("img").src = item.thumbnail || NO_THUMB;
     li.querySelector(".t").textContent = item.title;
-    li.querySelector(".s").textContent = item.channel;
+    li.querySelector(".s").textContent = songMeta(item, true);
+    li.querySelector(".s").title = songMeta(item);
     if (myIds.has(item.id)) {
       const chip = document.createElement("span");
       chip.className = "q-you";

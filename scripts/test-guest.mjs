@@ -7,7 +7,7 @@ function element() {
   const classes = new Set();
   const selectors = new Map();
   return {
-    children: [], value: "", disabled: false,
+    children: [], value: "", disabled: false, dataset: {},
     classList: {
       add: (name) => classes.add(name),
       remove: (name) => classes.delete(name),
@@ -16,6 +16,7 @@ function element() {
     },
     set innerHTML(value) { this.children = []; },
     appendChild(child) { this.children.push(child); },
+    querySelectorAll() { return []; },
     querySelector(selector) {
       if (!selectors.has(selector)) selectors.set(selector, element());
       return selectors.get(selector);
@@ -50,6 +51,8 @@ const source = ["i18n.js", "guest.js"].map((file) => readFileSync(new URL(`../pu
 runInContext(source, context);
 await Promise.resolve();
 const run = (code) => runInContext(code, context);
+assert.equal(document.getElementById("queue-panel").hidden, false, "Admin opens directly on Queue");
+assert.equal(document.getElementById("search-panel").hidden, true);
 assert.equal(run("searchMode"), "videos", "Guest and Admin default to videos");
 assert.equal(initialRequests[0], "/api/browse?q=__hits", "Initial recommendations use only the country chart");
 const publicDir = new URL("../public/", import.meta.url);
@@ -66,8 +69,14 @@ assert.equal(run('t("Explore")'), "Explore");
 assert.equal(run('t("Up Next")'), "Up Next");
 assert.equal(run('t("videos")'), "วีดีโอ");
 run('document.body.dataset.admin = "false"; renderQueue({autoQueue:true, autoQueueStatus:"unavailable", nowPlaying:{videoId:"auto0000001", title:"Auto", channel:"Artist", autoQueued:true}, queue:[]});');
-assert.match(document.getElementById("now-playing").querySelector(".np-sub").textContent, /เพลงอัตโนมัติ/);
+assert.match(document.getElementById("now-playing").querySelector(".np-requester").textContent, /เพลงอัตโนมัติ/);
 assert.match(document.getElementById("auto-queue-status").textContent, /เล่นต่ออัตโนมัติ: เปิด.*หาเพลงต่อไม่ได้/);
+run('renderQueue({autoQueue:true, nowPlaying:null, queue:[], autoQueueItems:[{videoId:"auto0000002",title:"Upcoming",channel:"Artist",autoQueued:true}]});');
+assert.equal(document.getElementById("auto-queue-count").textContent, 1);
+assert.equal(document.getElementById("auto-queue-section").hidden, false);
+assert.equal(document.getElementById("auto-queue-list").children[0].querySelector(".t").textContent, "Upcoming");
+run('renderQueue({autoQueue:false, nowPlaying:null, queue:[], autoQueueItems:[]});');
+assert.equal(document.getElementById("auto-queue-section").hidden, true);
 run('document.body.dataset.admin = "true";');
 const results = document.getElementById("results");
 const more = document.getElementById("more");
@@ -78,7 +87,7 @@ assert.equal(run("NICKNAMES.length"), 100);
 assert.equal(run("new Set(NICKNAMES).size"), 100);
 const nickname = storage.get("guestNickname");
 assert.equal(run("NICKNAMES.includes(nickname)"), true);
-assert.equal(document.getElementById("request-title").textContent, `คิวเพลิน by "${nickname}"`);
+assert.equal(document.getElementById("nickname-credit").textContent, `by "${nickname}"`);
 assert.equal(document.title, `คิวเพลิน by "${nickname}"`);
 const reloadElements = new Map();
 const reloadDocument = { ...document, getElementById(id) {
@@ -109,9 +118,9 @@ assert.equal(document.getElementById("queue-panel").hidden, false);
 assert.equal(document.getElementById("queue-tab")["aria-selected"], "true");
 assert.equal(document.getElementById("search-tab").tabIndex, -1);
 document.getElementById("queue-tab").onkeydown({ key: "Home", preventDefault() {} });
-assert.equal(document.getElementById("search-panel").hidden, false);
-assert.equal(document.getElementById("queue-panel").hidden, true);
-assert.equal(document.getElementById("search-tab").focused, true);
+assert.equal(document.getElementById("search-panel").hidden, true);
+assert.equal(document.getElementById("queue-panel").hidden, false);
+assert.equal(document.getElementById("queue-tab").focused, true, "Home selects first visual Admin tab");
 run("setParticipantsVisible(true); selectPageTab(2)");
 assert.equal(document.getElementById("participants-panel").hidden, false);
 assert.equal(document.getElementById("search-panel").hidden, true);
@@ -122,20 +131,28 @@ assert.equal(document.getElementById("search-tab").focused, true);
 run("selectPageTab(2)");
 assert.equal(document.getElementById("participants-panel").hidden, true, "Hidden tabs cannot be opened programmatically");
 document.getElementById("queue-tab").onkeydown({ key: "End", preventDefault() {} });
-assert.equal(document.getElementById("queue-tab").focused, true, "End skips the hidden participants tab");
+assert.equal(document.getElementById("search-tab").focused, true, "End follows visual Admin order and skips hidden participants");
 document.getElementById("queue-tab").onkeydown({ key: "ArrowRight", preventDefault() {} });
-assert.equal(document.getElementById("search-tab").focused, true, "Arrow navigation wraps through visible tabs only");
+assert.equal(document.getElementById("search-tab").focused, true, "Arrow navigation follows visible Admin tabs");
 run("selectPageTab(0)");
 for (const page of ["guest", "admin"]) {
   const html = readFileSync(new URL(`../public/${page}.html`, import.meta.url), "utf8");
   assert.match(html, /id="search-panel" role="tabpanel"/);
-  assert.match(html, /id="queue-panel"[^>]+hidden/);
+  assert.equal(/id="queue-panel"[^>]+hidden/.test(html), page === "guest", "Guest opens Search; Admin opens Queue");
+  assert.equal(/id="search-panel"[^>]+hidden/.test(html), page === "admin");
+  assert.match(html, /music-ui\.css\?v=/, "Shared styles have a cache-busting version");
   for (const mode of ["songs", "karaoke", "videos"]) {
     assert.match(html, new RegExp(`id="mode-${mode}" type="button" aria-pressed="${mode === "videos"}"`));
   }
   assert.doesNotMatch(html, /<select/);
-  assert.deepEqual([...html.matchAll(/id="mode-(\w+)"/g)].map((match) => match[1]), ["videos", "karaoke", "songs"]);
-  assert.match(html, /id="mode-videos"[^>]+data-i18n="videos"/, `${page}: video button uses the shared label`);
+  assert.deepEqual([...html.matchAll(/id="mode-(\w+)"/g)].map((match) => match[1]), ["songs", "videos", "karaoke"]);
+  for (const mode of ["songs", "videos", "karaoke"]) {
+    const button = html.match(new RegExp(`<button id="mode-${mode}"[^>]*>([\\s\\S]*?)</button>`))[1];
+    assert.match(button, /<svg[^>]+aria-hidden="true"/, `${page}: decorative mode icon`);
+    assert.match(button, new RegExp(`<span data-i18n="${mode}">`), `${page}: mode label survives translation`);
+  }
+  assert.match(html, /<h1 id="request-title">[\s\S]*?id="nickname-credit"/);
+  assert.doesNotMatch(html, /<p id="request-title"/);
   assert.match(html, /<section id="suggestions-section">/);
   assert.match(html, /id="shuffle" class="shuffle"/);
   assert.doesNotMatch(html, /id="browse-all"|data-i18n="All"/);
@@ -263,4 +280,38 @@ context.fetch = async (url, options) => {
   return { json: async () => ({ ok: true, position: 1 }) };
 };
 await run("requestSong({ videoId: 'song1', title: 'Test' }, document.createElement('button'))");
+// Request feedback keeps server validation intact, including thrown HTTP errors.
+const notices = [];
+context.notices = notices;
+run('toast = () => ({ set(...args) { notices.push(args); }, dismiss() {} }); cooldownToast = seconds => { globalThis.cooldownSeconds = seconds; }');
+let requestCalls = 0;
+let finishRequest;
+context.Room.fetch = () => { requestCalls++; return new Promise(resolve => { finishRequest = resolve; }); };
+const requestButton = element();
+context.requestButton = requestButton;
+const pendingRequest = run('requestSong({videoId:"pending",title:"Pending"}, requestButton)');
+assert.equal(requestButton.disabled, true);
+assert.equal(requestButton["aria-busy"], "true");
+await run('requestSong({videoId:"pending",title:"Pending"}, document.createElement("button"))');
+assert.equal(requestCalls, 1, "Repeated taps, even after list replacement, send one pending request");
+finishRequest({ok:true,position:1});
+await pendingRequest;
+assert.equal(requestButton.textContent, "✓");
+assert.equal(requestButton["aria-busy"], "false");
+assert.equal(run('pendingRequests.size'), 0);
+context.Room.fetch = async () => ({ok:false,reason:"เพลงนี้อยู่ในคิวแล้ว"});
+context.rejectedButton = element();
+await run('requestSong({videoId:"duplicate",title:"Duplicate"}, rejectedButton)');
+assert.equal(context.rejectedButton.disabled, false);
+assert.equal(notices.at(-1)[2], "เพลงนี้อยู่ในคิวแล้ว", "Duplicate reasons from server are shown");
+context.Room.fetch = async () => { throw Object.assign(new Error("รออีกสักครู่"), {status:429,retryIn:5}); };
+await run('requestSong({videoId:"cooldown",title:"Cooldown"}, rejectedButton)');
+assert.equal(context.cooldownSeconds, 5, "HTTP cooldown errors retain server retry time");
+context.Room.fetch = async () => { throw Object.assign(new Error("ไม่มีสิทธิ์เพิ่มเพลง"), {status:403}); };
+await run('requestSong({videoId:"forbidden",title:"Forbidden"}, rejectedButton)');
+assert.equal(notices.at(-1)[2], "ไม่มีสิทธิ์เพิ่มเพลง", "HTTP server errors are not replaced with a network error");
+context.Room.fetch = async () => { throw new Error("Failed to fetch"); };
+await run('requestSong({videoId:"offline",title:"Offline"}, rejectedButton)');
+assert.equal(notices.at(-1)[2], "การเชื่อมต่อขัดข้อง กรุณาลองใหม่");
+assert.equal(context.rejectedButton.disabled, false);
 console.log("PASS: Thai/English UI without Chinese or missing translations; nickname persistence/request attribution; five-song batches in search order; country chart in every mode without category buttons; chart paging/deduplication/retry; stale responses; search/queue tabs; songs/karaoke/video buttons.");

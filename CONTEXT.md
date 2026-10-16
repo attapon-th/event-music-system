@@ -79,15 +79,20 @@ It keeps its identity when reordered or promoted to Now Playing.
 _Avoid_: YouTube video identity, search result.
 
 **Queue**:
-The ordered collection of accepted items waiting to play after the current
+The ordered collection of accepted requested items waiting to play after the current
 song. The current song is outside the Queue.
 _Avoid_: Now Playing, playback history, separate admin playlist.
 
 **Auto Queue**:
-A room setting, enabled by default, that plays regular YouTube video recommendations based on the latest song
-when no requested songs remain. Requested songs take priority after the current
-automatic song finishes; turning the setting off leaves that song playing.
+A room setting, enabled by default, that plays ordered batches of YouTube video recommendations
+when no requested songs remain. New requests replace the waiting automatic batch;
+the current song finishes before the requested songs play.
 _Avoid_: YouTube account personalization, adding recommendations to the request Queue.
+
+**Automatic batch**:
+Up to five automatic songs selected together in YouTube recommendation order,
+played before selecting another batch from the latest song.
+_Avoid_: Shuffled playlist, requested Queue, recommendations refreshed for every song.
 
 **Automatic song**:
 A song selected by Auto Queue rather than requested by a participant.

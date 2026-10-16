@@ -16,7 +16,7 @@ export class JukeboxState {
     this.history = []; // played items (most recent last), capped
     this.autoQueue = true;
     this.autoQueueStatus = "idle";
-    this.autoQueueNext = null; // prepared song, outside the upcoming request queue
+    this.autoQueueItems = []; // ordered batch, outside the upcoming request queue
     this.autoQueueRequest = null;
     this.autoQueueFailures = 0;
     this.onChange = () => {};
@@ -36,6 +36,7 @@ export class JukeboxState {
       volume: this.volume,
       autoQueue: this.autoQueue,
       autoQueueStatus: this.autoQueueStatus,
+      autoQueueItems: this.autoQueueItems,
     };
   }
 
@@ -84,13 +85,11 @@ export class JukeboxState {
     }
     this.nowPlaying = this.queue.shift() || null;
     this.paused = false;
-    const prepared = this.autoQueueNext;
-    this.autoQueueNext = null;
     if (this.autoQueueFailures >= 3) {
+      this.autoQueueItems = [];
       this.autoQueueRequest = null;
       this.autoQueueStatus = "unavailable";
-    } else if (!this.nowPlaying && this.autoQueue && prepared) {
-      this.add({ ...prepared, autoQueued: true });
+    } else if (this._promoteAutoQueue()) {
       return;
     }
     this._emit();
@@ -155,10 +154,21 @@ export class JukeboxState {
   }
 
   _resetAutoQueue() {
-    this.autoQueueNext = null;
+    this.autoQueueItems = [];
     this.autoQueueRequest = null;
     this.autoQueueFailures = 0;
     this.autoQueueStatus = "idle";
+  }
+
+  _promoteAutoQueue() {
+    if (this.nowPlaying || this.queue.length || this.paused || !this.autoQueue || this.autoQueueFailures >= 3) return false;
+    while (this.autoQueueItems.length) {
+      const song = this.autoQueueItems.shift();
+      if (this.has(song.videoId) || this.history.some(item => item.videoId === song.videoId)) continue;
+      this.add({ ...song, autoQueued: true });
+      return true;
+    }
+    return false;
   }
 
   setAutoQueue(enabled) {

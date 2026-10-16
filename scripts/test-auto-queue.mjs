@@ -124,7 +124,7 @@ try {
   assert.equal(a.state.autoQueueStatus, "ready");
   assert.equal(a.state.queue.length, 0, "prepared recommendation is outside the main queue");
   assert.equal(a.state.nowPlaying.videoId, "main0000002");
-  assert.equal(a.state.autoQueueNext.videoId, "auto0000002");
+  assert.equal(a.state.autoQueueItems[0].videoId, "auto0000002");
   assert.deepEqual(checks, ["auto0000001", "auto0000002"], "exclude history/live/compilations and only check each candidate once");
   a.state.advance("main0000002");
   assert.equal(a.state.nowPlaying.videoId, "auto0000002");
@@ -134,6 +134,7 @@ try {
   assert.equal(a.state.history.length, history, "duplicate completion cannot advance the automatic song");
   await a.settle();
   a.state.advance("auto0000002");
+  await a.settle();
   assert.equal(a.state.nowPlaying.videoId, "auto0000003", "Auto Queue continues for multiple songs");
   await a.settle();
   a.state.add(song("main0000003"));
@@ -146,6 +147,57 @@ try {
   await a.settle();
   a.state.advance("main0000003");
   assert.equal(a.state.nowPlaying, null, "disabled Auto Queue leaves the room idle");
+
+  // Each batch is ordered, shared in snapshots and fetched once, including its last song.
+  blocked = new Set();
+  requests = [];
+  checks = [];
+  recommendations = seed => Array.from({ length: 8 }, (_, i) => song(`${seed === "batch000004" ? "later" : seed === "main0000012" ? "again" : "batch"}${String(i).padStart(6, "0")}`));
+  const batches = room();
+  batches.state.add(song("main0000010"));
+  await batches.settle();
+  const ids = Array.from({ length: 5 }, (_, i) => `batch${String(i).padStart(6, "0")}`);
+  assert.deepEqual(batches.state.snapshot().autoQueueItems.map(item => item.videoId), ids);
+  assert.equal(checks.length, 5, "stop checking once five playable recommendations are ready");
+  assert.equal(batches.state.queue.length, 0);
+  batches.state.advance("main0000010");
+  for (const [index, id] of ids.entries()) {
+    await batches.settle();
+    assert.equal(batches.state.nowPlaying.videoId, id);
+    assert.equal(batches.state.autoQueueItems.length, 4 - index);
+    batches.state.setVolume(35);
+    batches.state.setPaused(true);
+    batches.state.setPaused(false);
+    assert.deepEqual(requests, ["main0000010"], "no refetch while any song of the batch is playing");
+    batches.state.skip();
+  }
+  await batches.settle();
+  assert.deepEqual(requests, ["main0000010", "batch000004"], "next batch uses the last completed/skipped song");
+  assert.equal(batches.state.nowPlaying.videoId, "later000000");
+  assert.equal(batches.state.autoQueueItems.length, 4);
+  batches.state.add(song("main0000011"));
+  assert.equal(batches.state.autoQueueItems.length, 0, "accepted request clears all automatic waiting songs immediately");
+  assert.equal(batches.state.nowPlaying.videoId, "later000000");
+  batches.state.add(song("main0000012"));
+  batches.state.skip();
+  await batches.settle();
+  assert.equal(requests.length, 2, "do not prepare while requested songs remain queued");
+  batches.state.skip();
+  await batches.settle();
+  assert.equal(requests.at(-1), "main0000012", "new batch is based on the final requested song");
+  assert.equal(batches.state.autoQueueItems.length, 5);
+  batches.state.setAutoQueue(false);
+  assert.equal(batches.state.autoQueueItems.length, 0);
+
+  recommendations = () => Array.from({ length: 30 }, (_, i) => song(`bad${String(i).padStart(8, "0")}`));
+  blocked = new Set(recommendations().map(item => item.videoId));
+  checks = [];
+  const bounded = room();
+  bounded.state.add(song("main0000013"));
+  await bounded.settle();
+  assert.equal(checks.length, 20, "one batch checks at most twenty recommendations");
+  assert.equal(bounded.state.autoQueueStatus, "unavailable");
+  blocked = new Set();
 
   // Hold an old response across off/on and a new request. Only the latest seed wins.
   recommendations = seed => [song(seed === "main0000004" ? "auto0000004" : "auto0000005")];
@@ -163,10 +215,10 @@ try {
   oldRelease();
   await race.settle();
   assert.equal(race.state.nowPlaying.videoId, "main0000005");
-  assert.equal(race.state.autoQueueNext.videoId, "auto0000005", "old response cannot replace the new recommendation");
+  assert.equal(race.state.autoQueueItems[0].videoId, "auto0000005", "old response cannot replace the new recommendation");
   race.state.setAutoQueue(false);
   assert.equal(race.state.nowPlaying.videoId, "main0000005", "turning off preserves current playback");
-  assert.equal(race.state.autoQueueNext, null);
+  assert.equal(race.state.autoQueueItems.length, 0);
 
   const checking = room();
   checking.state.setAutoQueue(false);
@@ -180,7 +232,7 @@ try {
   await checking.settle();
   assert.equal(checking.state.nowPlaying.videoId, "main0000004");
   assert.equal(checking.state.queue[0].videoId, "main0000005");
-  assert.equal(checking.state.autoQueueNext, null, "new requests cancel a recommendation during its playability check");
+  assert.equal(checking.state.autoQueueItems.length, 0, "new requests cancel a recommendation during its playability check");
 
   const disabled = room();
   disabled.state.setAutoQueue(false);
@@ -218,7 +270,7 @@ try {
   release();
   await closed.settle();
   assert.equal(closed.state.nowPlaying, null);
-  assert.equal(closed.state.autoQueueNext, null, "late reply cannot resurrect a closed room");
+  assert.equal(closed.state.autoQueueItems.length, 0, "late reply cannot resurrect a closed room");
 
   // An unavailable response never retries on unrelated volume/pause broadcasts.
   const failure = room();
@@ -244,7 +296,7 @@ try {
   checks = [];
   failure.state.add(song("main0000007"));
   await failure.settle();
-  assert.equal(checks.length, 3, "unplayable candidate checks are bounded");
+  assert.equal(checks.length, 5, "unplayable checks visit the returned candidates once");
 
   // Three consecutive IFrame failures stop automatic playback; a new request resets it.
   blocked = new Set();

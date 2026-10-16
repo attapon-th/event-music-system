@@ -32,12 +32,39 @@ const Room = (() => {
     <p id="room-retry" role="status" aria-live="polite"></p>`;
   document.body.prepend(panel);
   const node = (id) => document.getElementById(id);
+  function showPlayerEntry() {
+    node("start-btn").hidden = true;
+    node("start-prompt").hidden = true;
+    node("room-create").hidden = false;
+    node("entry-code").focus();
+  }
   if (screen === "player") {
-    node("start-btn").onclick = () => {
-      node("start-btn").hidden = true;
-      node("start-prompt").hidden = true;
-      node("room-create").hidden = false;
-      node("entry-code").focus();
+    node("start-btn").onclick = async () => {
+      const button = node("start-btn");
+      if (button.disabled) return;
+      const previous = recentPlayer();
+      if (!previous) { showPlayerEntry(); return; }
+      button.disabled = true;
+      node("room-error").textContent = t("resumingPlayer");
+      try {
+        const member = await api("/api/info", {}, previous.token, previous.sessionId);
+        if (member.role !== "player" || member.code !== previous.code || member.sessionId !== previous.sessionId) {
+          const error = new Error(t("roomUnavailable"));
+          error.status = 401;
+          throw error;
+        }
+        remember(member);
+        applyState({ role: "player" });
+        history.replaceState(null, "", url("player"));
+        node("room-error").textContent = "";
+        Room.onJoined?.();
+      } catch (error) {
+        node("room-error").textContent = error.status ? error.message : t("networkError");
+        if ([401, 403, 410].includes(error.status)) {
+          forgetPlayer(previous);
+          showPlayerEntry();
+        }
+      } finally { button.disabled = false; }
     };
     node("start-btn").focus();
   }
@@ -45,7 +72,32 @@ const Room = (() => {
   document.body.dataset.roomActive = "false";
   node("room-code").value = params.get("room") || "";
   const key = (id, player) => `music-session:${id}:${player ? "player" : "member"}`;
+  const lastPlayerKey = "music-last-player";
   const credentialStorage = (player) => player ? sessionStorage : localStorage;
+  function recentPlayer() {
+    let previous;
+    try { previous = JSON.parse(localStorage.getItem(lastPlayerKey) || "null"); } catch {
+      localStorage.removeItem(lastPlayerKey);
+      return null;
+    }
+    if (!previous) return null;
+    if (!/^[1-9][0-9]{2}$/.test(previous.code) || typeof previous.sessionId !== "string" || !previous.sessionId ||
+        typeof previous.token !== "string" || !previous.token) {
+      localStorage.removeItem(lastPlayerKey);
+      return null;
+    }
+    if ((params.get("room") && params.get("room") !== previous.code) ||
+        (params.get("session") && params.get("session") !== previous.sessionId)) return null;
+    return previous;
+  }
+  function forgetPlayer(member) {
+    let previous;
+    try { previous = JSON.parse(localStorage.getItem(lastPlayerKey) || "null"); } catch {
+      localStorage.removeItem(lastPlayerKey);
+    }
+    if (previous?.sessionId === member.sessionId && previous?.token === member.token) localStorage.removeItem(lastPlayerKey);
+    if (sessionStorage.getItem(key(member.sessionId, true)) === member.token) sessionStorage.removeItem(key(member.sessionId, true));
+  }
   function saved(code, id, player) {
     const knownId = id || localStorage.getItem(`music-room:${code}`);
     return knownId ? credentialStorage(player).getItem(key(knownId, player)) : null;
@@ -56,6 +108,7 @@ const Room = (() => {
     stopped = false;
     credentialStorage(member.role === "player").setItem(key(member.sessionId, member.role === "player"), member.token);
     localStorage.setItem(`music-room:${member.code}`, member.sessionId);
+    if (member.role === "player") localStorage.setItem(lastPlayerKey, JSON.stringify({ code: member.code, sessionId: member.sessionId, token: member.token }));
   }
   function url(target) {
     return `${target === "player" ? "/" : target === "admin" ? "/a" : "/guest"}?room=${current.code}&session=${current.sessionId}`;
@@ -81,6 +134,7 @@ const Room = (() => {
     stopped = true;
     authenticated = false;
     clearTimeout(retry);
+    if (current?.role === "player" && forget) forgetPlayer(current);
     if (current && forget && credentialStorage(current.role === "player").getItem(key(current.sessionId, current.role === "player")) === current.token) {
       credentialStorage(current.role === "player").removeItem(key(current.sessionId, current.role === "player"));
     }
@@ -119,7 +173,7 @@ const Room = (() => {
     const data = await response.json();
     if (!response.ok) {
       if (data.code === "SESSION_INVALID") unavailable(data.error);
-      const error = new Error(data.error || t("roomActionFailed"));
+      const error = new Error(data.error || data.reason || t("roomActionFailed"));
       error.status = response.status;
       error.retryIn = data.retryIn;
       throw error;

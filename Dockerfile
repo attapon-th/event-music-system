@@ -1,6 +1,11 @@
 # Event Music System — runs on Bun.
 FROM oven/bun:1-alpine
 
+ENV TZ=Asia/Bangkok
+RUN apk add --no-cache tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo "$TZ" > /etc/timezone
+
 WORKDIR /app
 
 # Install dependencies first (better layer caching).

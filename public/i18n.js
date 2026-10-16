@@ -1,5 +1,21 @@
 // Shared UI dictionary. Add another locale here when needed.
 const UI_MESSAGES = { th: {
+  "settings": "ตั้งค่าห้อง",
+  "close": "ปิด",
+  "clearSearch": "ล้างคำค้นหา",
+  "roomCode": "ห้อง {code}",
+  "navigation": "เมนูหลัก",
+  "songResults": "รายการเพลง",
+  "songActions": "จัดการเพลง",
+  "moreSongActions": "จัดการเพลง {title}",
+  "addSong": "เพิ่ม {title} เข้าคิว",
+  "nicknameCredit": 'by "{nickname}"',
+  "resumingPlayer": "กำลังตรวจสอบห้องเดิม…",
+  "autoQueueEnabled": "เล่นต่ออัตโนมัติเปิดอยู่",
+  "guestRole": "ผู้ฟัง",
+  "playerRole": "จอเล่นเพลง",
+  "cooldownHelp": "กดเวลารอเพื่อเปลี่ยนช่วงห่างระหว่างการขอเพลงแต่ละครั้ง",
+
   "creationPassword": "รหัสสร้าง",
   "entryCredential": "รหัสสร้างห้องหรือเลขห้อง",
   "entryRetry": "ลองใหม่ได้ใน {seconds} วินาที",
