@@ -71,7 +71,7 @@ class CDP {
     }
   }
   async key(key, code = key) {
-    await this.call('Input.dispatchKeyEvent', { type: 'keyDown', key, code, ...(key === 'Enter' ? {text:'\r',unmodifiedText:'\r'} : {}), windowsVirtualKeyCode: { Enter: 13, Escape: 27, Tab: 9, ArrowDown: 40 }[key] });
+    await this.call('Input.dispatchKeyEvent', { type: 'keyDown', key, code, ...(key === 'Enter' ? {text:'\r',unmodifiedText:'\r'} : {}), windowsVirtualKeyCode: { Enter: 13, Escape: 27, Tab: 9, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 }[key] });
     await this.call('Input.dispatchKeyEvent', { type: 'keyUp', key, code });
   }
   async viewport(width) {
@@ -321,12 +321,35 @@ try {
   await admin.wait('adminState.nowPlaying.videoId === "manual00001" && adminState.autoQueueItems.length === 5');
   await guest.wait('lastQueueState.autoQueueItems.length === 5');
 
-  // Closing a real Player tab drops sessionStorage; the browser's remembered room resumes after Start.
+  // Closing a real Player tab drops sessionStorage; the main-screen card can resume the remembered room.
   const playerPage = await page('/', false);
   await playerPage.viewport(1440);
-  await playerPage.click('#start-btn', true);
-  await playerPage.click('#entry-code', true); await playerPage.call('Input.insertText', {text:'45615'}); await playerPage.key('Enter');
+  await playerPage.call('Page.bringToFront');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'start-btn');
+  await playerPage.key('Enter');
+  await playerPage.wait('!document.querySelector("#random-room-2").disabled');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'room-join');
+  assert.equal(await playerPage.eval('document.querySelector("#join-room-title").textContent'), 'เข้าร่วม');
+  assert.equal(await playerPage.eval('document.querySelector("#manual-room-title").textContent'), 'สร้างห้องเอง');
+  await playerPage.key('ArrowDown');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'random-room-2');
+  await playerPage.key('ArrowUp');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'room-join');
+  await playerPage.key('ArrowRight');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'random-room-1');
+  await playerPage.key('ArrowDown');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'manual-room');
+  await playerPage.key('Enter');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'entry-code');
+  await playerPage.key('Escape');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'manual-room');
+  await playerPage.key('Enter');
+  await playerPage.call('Input.insertText', {text:'456'});
+  await playerPage.key('ArrowDown');
+  assert.equal(await playerPage.eval('document.activeElement === document.querySelector("#room-create button")'), true);
+  await playerPage.key('Enter');
   await playerPage.wait('document.body.dataset.roomActive === "true" && Room.connected');
+  assert.equal(await playerPage.eval('Room.code'), '456');
   const playerSession = await playerPage.eval('Room.sessionId');
   const playerContext = playerPage.browserContextId;
   await browser.call('Target.closeTarget', {targetId:playerPage.targetId});
@@ -334,25 +357,29 @@ try {
   const returned = await page('/', false, playerContext);
   await returned.viewport(1440);
   assert.equal(await returned.eval('Room.token'), undefined);
-  assert.equal(await returned.eval('document.querySelector("#room-create").hidden'), true);
+  assert.equal(await returned.eval('document.querySelector("#room-options").hidden'), true);
   await returned.click('#start-btn', true);
+  await returned.wait('!document.querySelector("#room-options").hidden');
+  assert.equal(await returned.eval('Room.token'), undefined);
+  await returned.click('#resume-player', true);
   await returned.wait('document.body.dataset.roomActive === "true" && Room.connected');
   assert.equal(await returned.eval('Room.sessionId'), playerSession);
-  assert.equal(await returned.eval('document.querySelector("#room-create").hidden'), true);
+  assert.equal(await returned.eval('document.querySelector(".player-entry").hidden'), true);
   await returned.eval('window.playerReloadMarker = true');
   await returned.call('Page.reload');
   await returned.wait('!window.playerReloadMarker && document.body?.dataset.roomActive === "true" && Room.connected');
   assert.equal(await returned.eval('Room.sessionId'), playerSession);
-  // Two active tabs survive one tab leaving; explicit Leave clears future automatic entry.
+  // Two active tabs survive one tab leaving; explicit Leave clears the resume option.
   const secondPlayer = await page('/', false, playerContext);
   await secondPlayer.viewport(1440);
-  await secondPlayer.click('#start-btn'); await secondPlayer.wait('Room.connected');
+  await secondPlayer.click('#start-btn'); await secondPlayer.click('#resume-player'); await secondPlayer.wait('Room.connected');
   await returned.click('#exit-room');
   await returned.wait('document.body.dataset.roomActive === "false"');
   assert.equal(await secondPlayer.eval('Room.connected'), true);
   assert.equal(await secondPlayer.eval('localStorage.getItem("music-last-player")'), null);
   await returned.click('#start-btn');
-  assert.equal(await returned.eval('document.querySelector("#room-create").hidden'), false);
+  assert.equal(await returned.eval('document.querySelector("#room-options").hidden'), false);
+  assert.equal(await returned.eval('document.querySelector("#resume-player").hidden'), true);
   // A deleted/replaced room must show entry, even if its room number is reused.
   const previousToken = await secondPlayer.eval('Room.token');
   await secondPlayer.eval('Room.fetch("/api/sessions/close", {method:"POST"})');
@@ -362,9 +389,35 @@ try {
   const invalidated = await page('/', false, playerContext);
   await invalidated.eval(`localStorage.setItem("music-last-player", JSON.stringify({code:"456",sessionId:${JSON.stringify(playerSession)},token:${JSON.stringify(previousToken)}}))`);
   await invalidated.click('#start-btn');
-  await invalidated.wait('!document.querySelector("#room-create").hidden');
+  await invalidated.click('#resume-player');
+  await invalidated.wait('document.querySelector("#resume-player").hidden');
   assert.equal(await invalidated.eval('document.body.dataset.roomActive'), 'false');
   assert.equal(await invalidated.eval('localStorage.getItem("music-last-player")'), null);
+  const randomPlayer = await page('/', false);
+  await randomPlayer.click('#start-btn', true);
+  await randomPlayer.wait('!document.querySelector("#random-room-2").disabled');
+  assert.equal(await randomPlayer.eval('document.querySelector(".room-options-grid").children.length'), 4);
+  assert.equal(await randomPlayer.eval('getComputedStyle(document.querySelector(".room-options-grid")).gridTemplateColumns.split(" ").length'), 1);
+  const randomCode = await randomPlayer.eval('document.querySelector("#random-code-2").textContent');
+  assert.match(randomCode, /^[1-9][0-9]{2}$/);
+  assert.notEqual(randomCode, await randomPlayer.eval('document.querySelector("#random-code-1").textContent'));
+  await randomPlayer.viewport(1440);
+  assert.equal(await randomPlayer.eval('getComputedStyle(document.querySelector(".room-options-grid")).gridTemplateColumns.split(" ").length'), 2);
+  // Older Android remotes can report raw D-pad key codes with no DOM key name.
+  await randomPlayer.eval('document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Unidentified", keyCode: 20, bubbles: true, cancelable: true }))');
+  assert.equal(await randomPlayer.eval('document.activeElement.id'), 'random-room-2');
+  await randomPlayer.eval('document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Unidentified", keyCode: 23, bubbles: true, cancelable: true }))');
+  await randomPlayer.wait('Room.connected');
+  assert.equal(await randomPlayer.eval('Room.code'), randomCode);
+  const controlPage = await page('/', false);
+  await controlPage.call('Page.bringToFront');
+  await controlPage.key('Enter');
+  await controlPage.key('Enter');
+  assert.equal(await controlPage.eval('document.activeElement.id'), 'room-code');
+  await controlPage.call('Input.insertText', { text: randomCode });
+  await controlPage.key('Enter');
+  await controlPage.wait('location.pathname === "/a" && typeof Room !== "undefined" && Room.connected');
+  assert.equal(await controlPage.eval('Room.code'), randomCode);
   for (const client of clients.slice(1)) assert.deepEqual(client.errors, [], 'No JavaScript runtime errors');
   // Export clean final views after the role redirects have rebuilt Guest feedback.
   await admin.click('#queue-tab'); await guest.click('#search-tab');

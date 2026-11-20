@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 const source = ["i18n.js", "session.js"].map(file => readFileSync(new URL(`../public/${file}`, import.meta.url), "utf8")).join("\n");
 
-function page(screen, search, storage, respond, tabStorage = new Map()) {
+function page(screen, search, storage, respond, tabStorage = new Map(), roomOptions = () => ({ data: { codes: ["234", "345"] } })) {
   const nodes = new Map();
   function node(id) {
     if (!nodes.has(id)) {
@@ -37,7 +37,7 @@ function page(screen, search, storage, respond, tabStorage = new Map()) {
     fetch: async (path, options) => {
       const body = options.body ? JSON.parse(options.body) : undefined;
       requests.push({ path, body, headers: options.headers });
-      const result = await respond(path, body, options.headers);
+      const result = await (path === "/api/sessions/available" ? roomOptions() : respond(path, body, options.headers));
       return { ok: !result.status || result.status < 400, status: result.status || 200, json: async () => JSON.parse(JSON.stringify(result.data)) };
     },
     Date: class extends Date { static now() { return time; } },
@@ -75,30 +75,29 @@ const entry = page("player", "", new Map(), (path, body) => {
   return { data: { ...member, role: "player", token: "player-token" } };
 });
 assert.equal(await entry.run("Room.ready"), false);
-assert.equal(entry.nodes.get("room-join").hidden, true);
-assert.equal(entry.nodes.get("room-create").hidden, true);
+assert.equal(entry.nodes.get("room-options").hidden, true);
 assert.equal(entry.nodes.get("room-welcome").hidden, false);
 assert.equal(entry.nodes.get("start-btn").focused, true);
 assert.equal(entry.nodes.get("entry-code").type, "text", "The credential is displayed openly without a password input");
 assert.equal(entry.nodes.get("entry-code").inputmode, "numeric");
-assert.equal(entry.nodes.get("entry-code").pattern, "[0-9]+");
+assert.equal(entry.nodes.get("entry-code").pattern, "[1-9][0-9]{2}");
+assert.equal(entry.nodes.get("entry-code").maxlength, "3");
 assert.equal(entry.nodes.get("entry-code").autocomplete, "off");
-assert.equal(entry.nodes.get("entry-code")["aria-label"], "รหัสสร้างห้องหรือเลขห้อง");
-entry.nodes.get("start-btn").onclick();
-assert.equal(entry.requests.length, 0, "Start reveals the entry field without creating a room");
-assert.equal(entry.nodes.get("room-create").hidden, false);
-assert.equal(entry.nodes.get("entry-code").focused, true);
-assert.equal(entry.nodes.get("start-btn").hidden, true);
+await entry.nodes.get("start-btn").onclick();
+assert.deepEqual(entry.requests.map(request => request.path), ["/api/sessions/available"], "Start loads choices without creating a room");
+assert.equal(entry.nodes.get("room-options").hidden, false);
+assert.equal(entry.nodes.get("room-join").focused, true);
+assert.equal(entry.nodes.get("room-welcome").hidden, true);
 entry.run("Room.onJoined = () => { globalThis.opened = true; }");
-entry.nodes.get("entry-code").value = "1236";
+entry.nodes.get("entry-code").value = "123";
 await entry.nodes.get("room-create").onsubmit({ preventDefault() {} });
 assert.equal(entry.nodes.get("room-error").textContent, "รหัสสร้างไม่ถูกต้อง");
-assert.equal(entry.nodes.get("room-create").hidden, false, "wrong codes keep the entry field available for retry");
+assert.equal(entry.nodes.get("room-options").hidden, false, "wrong codes keep the entry field available for retry");
 assert.equal(entry.nodes.get("room-content").hidden, true);
 assert.equal(entry.nodes.get("room-create").querySelector().disabled, true);
 assert.equal(entry.nodes.get("room-retry").textContent, "ลองใหม่ได้ใน 5 วินาที");
 await entry.nodes.get("room-create").onsubmit({ preventDefault() {} });
-assert.equal(entry.requests.length, 1, "Enter cannot bypass the retry countdown");
+assert.equal(entry.requests.length, 2, "Enter cannot bypass the retry countdown");
 entry.advance(1000);
 assert.equal(entry.nodes.get("room-retry").textContent, "ลองใหม่ได้ใน 4 วินาที");
 entry.advance(4000);
@@ -122,15 +121,15 @@ for (const role of ["guest", "admin", "controller"]) {
   });
   await joined.run("Room.ready");
   joined.run("Room.onJoined = () => { throw new Error('Joining a room must not open Player'); }");
-  joined.nodes.get("start-btn").onclick();
-  joined.nodes.get("entry-code").value = "123";
-  await joined.nodes.get("room-create").onsubmit({ preventDefault() {} });
+  await joined.nodes.get("start-btn").onclick();
+  joined.nodes.get("room-code").value = "123";
+  await joined.nodes.get("room-join").onsubmit({ preventDefault() {} });
   assert.equal(joined.location.href, `${role === "guest" ? "/guest" : "/a"}?room=123&session=room-id`);
   assert.equal(joined.nodes.get("room-content").hidden, true);
 }
 const rateLimited = page("player", "", new Map(), () => ({ status: 429, data: { error: "รอก่อน", retryIn: 60 } }));
 await rateLimited.run("Room.ready");
-rateLimited.nodes.get("entry-code").value = "9999";
+rateLimited.nodes.get("entry-code").value = "999";
 await rateLimited.nodes.get("room-create").onsubmit({ preventDefault() {} });
 rateLimited.advance(5000);
 assert.equal(rateLimited.nodes.get("room-retry").textContent, "ลองใหม่ได้ใน 55 วินาที");
@@ -140,31 +139,55 @@ rateLimited.advance(55000);
 assert.equal(rateLimited.nodes.get("room-create").querySelector().disabled, false);
 const expiringLimit = page("player", "", new Map(), () => ({ status: 429, data: { error: "รอก่อน", retryIn: 2 } }));
 await expiringLimit.run("Room.ready");
-expiringLimit.nodes.get("entry-code").value = "9999";
+expiringLimit.nodes.get("entry-code").value = "999";
 await expiringLimit.nodes.get("room-create").onsubmit({ preventDefault() {} });
 assert.equal(expiringLimit.nodes.get("room-retry").textContent, "ลองใหม่ได้ใน 2 วินาที", "HTTP 429 shows the remaining time even below five seconds");
 expiringLimit.advance(2000);
 assert.equal(expiringLimit.nodes.get("room-create").querySelector().disabled, false);
 const failedJoin = page("player", "", new Map(), () => ({ status: 410, data: { error: "ไม่พบห้อง", retryIn: 5 } }));
 await failedJoin.run("Room.ready");
-failedJoin.nodes.get("entry-code").value = "123";
-await failedJoin.nodes.get("room-create").onsubmit({ preventDefault() {} });
+failedJoin.nodes.get("room-code").value = "123";
+await failedJoin.nodes.get("room-join").onsubmit({ preventDefault() {} });
 assert.equal(failedJoin.nodes.get("room-retry").textContent, "ลองใหม่ได้ใน 5 วินาที");
 const networkError = page("player", "", new Map(), () => { throw new Error("offline"); });
 await networkError.run("Room.ready");
-networkError.nodes.get("entry-code").value = "1236";
+networkError.nodes.get("entry-code").value = "123";
 await networkError.nodes.get("room-create").onsubmit({ preventDefault() {} });
 assert.equal(networkError.nodes.get("room-create").querySelector().disabled, false);
 assert.equal(networkError.nodes.get("room-retry").textContent, "");
 let resolvePending;
 const submitting = page("player", "", new Map(), () => new Promise(resolve => { resolvePending = resolve; }));
 await submitting.run("Room.ready");
-submitting.nodes.get("entry-code").value = "1236";
+submitting.nodes.get("entry-code").value = "123";
 const pendingSubmit = submitting.nodes.get("room-create").onsubmit({ preventDefault() {} });
 await submitting.nodes.get("room-create").onsubmit({ preventDefault() {} });
 assert.equal(submitting.requests.length, 1, "An in-flight submission cannot create duplicate rooms");
 resolvePending({ data: { ...member, role: "player" } });
 await pendingSubmit;
+
+let optionsLoads = 0;
+const random = page("player", "", new Map(), (path, body) => {
+  assert.equal(path, "/api/sessions/random");
+  if (body.code === "234") return { status: 409, data: { error: "เลขห้องนี้ถูกใช้แล้ว" } };
+  assert.equal(body.code, "456");
+  return { data: { ...member, code: body.code, role: "player" } };
+}, new Map(), () => ({ data: { codes: ++optionsLoads === 1 ? ["234", "345"] : ["456"] } }));
+await random.run("Room.ready");
+await random.nodes.get("start-btn").onclick();
+assert.equal(random.nodes.get("random-code-1").textContent, "234");
+assert.equal(random.nodes.get("random-code-2").textContent, "345");
+const randomSubmit = random.nodes.get("random-room-1").onclick();
+await random.nodes.get("random-room-2").onclick();
+await randomSubmit;
+await new Promise(setImmediate);
+assert.equal(random.nodes.get("room-content").hidden, true, "a collision never joins the existing room");
+assert.equal(random.nodes.get("room-error").textContent, "เลขห้องนี้ถูกใช้แล้ว");
+assert.equal(random.nodes.get("random-code-1").textContent, "456");
+assert.equal(random.nodes.get("random-room-2").disabled, true, "only one card is usable when one code remains");
+await random.nodes.get("random-room-1").onclick();
+assert.deepEqual(random.requests.filter(request => request.body).map(request => request.body.code), ["234", "456"]);
+assert.equal(random.nodes.get("room-content").hidden, false);
+assert.equal(random.history.url, "/?room=456&session=room-id");
 
 const storage = new Map([["guestNickname", "ผู้ฟังเอ"]]);
 const firstAdmin = page("guest", "?room=123&session=room-id", storage, path => {
@@ -251,8 +274,8 @@ player.sockets[0].onmessage({ data: JSON.stringify({ type: "sessionEnded", code:
 assert.equal(player.run("ended"), true);
 assert.equal(playerStorage.has(playerKey), false);
 assert.equal(player.nodes.get("room-content").hidden, true);
-assert.equal(player.nodes.get("room-create").hidden, true);
-assert.equal(player.nodes.get("start-btn").hidden, false);
+assert.equal(player.nodes.get("room-options").hidden, true);
+assert.equal(player.nodes.get("room-welcome").hidden, false);
 assert.equal(player.nodes.get("start-btn").focused, true);
 assert.equal(player.timers.length, 0);
 assert.equal(player.history.url, "/");
@@ -292,7 +315,7 @@ const players = tabs.map((tabStorage, index) => page("player", "", sharedStorage
   }, tabStorage));
 for (const tab of players) {
   await tab.run("Room.ready");
-  tab.nodes.get("entry-code").value = "1236";
+  tab.nodes.get("entry-code").value = "123";
   await tab.nodes.get("room-create").onsubmit({ preventDefault() {} });
   tab.run("Room.connect({onEnd() { globalThis.ended = true; }})");
 }
@@ -313,7 +336,7 @@ assert.equal(tabs[1].get(playerKey), "player-1", "Leaving one tab retains other 
 assert.equal(players[1].sockets[0].readyState, 1);
 assert.equal(players[0].history.url, "/");
 assert.equal(players[0].nodes.get("start-btn").hidden, false);
-// A new tab/browser remembers only the last room, and validates it after Start.
+// A new tab/browser remembers only the last room, and validates it on explicit resume.
 const resumeRecord = { code: "123", sessionId: "room-id", token: "player-remembered" };
 const resumeStorage = () => new Map([["music-last-player", JSON.stringify(resumeRecord)]]);
 const persisted = resumeStorage();
@@ -329,17 +352,22 @@ assert.equal(await returning.run("Room.ready"), false);
 assert.equal(returning.requests.length, 0, "do not resume before the Start gesture");
 returning.run("Room.onJoined = () => { globalThis.opened = true; }");
 await returning.nodes.get("start-btn").onclick();
+assert.equal(returning.nodes.get("room-options").hidden, false);
+assert.equal(returning.nodes.get("resume-player").textContent, "กลับเข้าห้องล่าสุด 123");
+assert.equal(returning.requests.length, 1, "Start only loads the room menu even with a remembered room");
+await returning.nodes.get("resume-player").onclick();
 assert.equal(returning.run("opened"), true);
 assert.equal(returning.nodes.get("room-content").hidden, false);
-assert.equal(returning.nodes.get("room-create").hidden, true);
+assert.equal(returning.nodes.get("panel").hidden, true);
 assert.equal(resumeTab.get(playerKey), resumeRecord.token);
 assert.deepEqual(JSON.parse(persisted.get("music-last-player")), resumeRecord, "never persist the entered checksum code");
 returning.run("Room.leave()");
 assert.equal(persisted.has("music-last-player"), false);
 assert.equal(resumeTab.has(playerKey), false);
 await returning.nodes.get("start-btn").onclick();
-assert.equal(returning.requests.length, 1, "explicit Leave makes the next Start reveal entry");
-assert.equal(returning.nodes.get("room-create").hidden, false);
+assert.equal(returning.requests.length, 3, "explicit Leave makes the next Start load choices without resuming");
+assert.equal(returning.nodes.get("room-options").hidden, false);
+assert.equal(returning.nodes.get("resume-player").hidden, true);
 
 for (const data of [null, { ...member, ...resumeRecord, sessionId: "replacement", role: "player" },
     { ...member, ...resumeRecord, role: "guest" }, { ...member, ...resumeRecord, code: "456", role: "player" }]) {
@@ -348,17 +376,19 @@ for (const data of [null, { ...member, ...resumeRecord, sessionId: "replacement"
     ? { data } : { status: 401, data: { code: "SESSION_INVALID", error: "ห้องหมดอายุ" } });
   await stale.run("Room.ready");
   await stale.nodes.get("start-btn").onclick();
+  await stale.nodes.get("resume-player").onclick();
   assert.equal(staleStorage.has("music-last-player"), false, "reject expired, replaced, wrong-role or mismatched rooms");
-  assert.equal(stale.nodes.get("room-create").hidden, false);
+  assert.equal(stale.nodes.get("room-options").hidden, false);
+  assert.equal(stale.nodes.get("resume-player").hidden, true);
   assert.equal(stale.nodes.get("room-content").hidden, true);
-  assert.equal(stale.requests.length, 1, "never create a replacement room automatically");
+  assert.equal(stale.requests.length, 2, "never create a replacement room automatically");
 }
 for (const search of ["?room=456", "?room=123&session=replacement"]) {
   const other = page("player", search, resumeStorage(), () => { throw new Error("must not resume another room"); });
   await other.run("Room.ready");
   await other.nodes.get("start-btn").onclick();
-  assert.equal(other.requests.length, 0);
-  assert.equal(other.nodes.get("room-create").hidden, false);
+  assert.equal(other.requests.length, 1);
+  assert.equal(other.nodes.get("resume-player").hidden, true);
 }
 for (const record of ["not-json", JSON.stringify({code:"123",sessionId:"room-id"})]) {
   const malformedStorage = new Map([["music-last-player", record]]);
@@ -366,14 +396,15 @@ for (const record of ["not-json", JSON.stringify({code:"123",sessionId:"room-id"
   await malformed.run("Room.ready");
   await malformed.nodes.get("start-btn").onclick();
   assert.equal(malformedStorage.has("music-last-player"), false);
-  assert.equal(malformed.nodes.get("room-create").hidden, false);
+  assert.equal(malformed.nodes.get("resume-player").hidden, true);
 }
 const serverDownStorage = resumeStorage();
 const serverDown = page("player", "", serverDownStorage, () => ({status:503, data:{error:"ลองใหม่ภายหลัง"}}));
 await serverDown.run("Room.ready");
 await serverDown.nodes.get("start-btn").onclick();
+await serverDown.nodes.get("resume-player").onclick();
 assert.equal(serverDownStorage.has("music-last-player"), true);
-assert.equal(serverDown.nodes.get("start-btn").hidden, false);
+assert.equal(serverDown.nodes.get("resume-player").hidden, false);
 let releaseResume;
 const networkStorage = resumeStorage();
 let networkDown = true;
@@ -385,19 +416,20 @@ const retrying = page("player", "", networkStorage, async () => {
   return { data: { ...member, ...resumeRecord, role: "player" } };
 });
 await retrying.run("Room.ready");
-const pendingResume = retrying.nodes.get("start-btn").onclick();
-assert.equal(retrying.nodes.get("start-btn").disabled, true);
 await retrying.nodes.get("start-btn").onclick();
-assert.equal(retrying.requests.length, 1, "prevent duplicate resume requests while checking");
+const pendingResume = retrying.nodes.get("resume-player").onclick();
+assert.equal(retrying.nodes.get("resume-player").disabled, true);
+await retrying.nodes.get("resume-player").onclick();
+assert.equal(retrying.requests.length, 2, "prevent duplicate resume requests while checking");
 releaseResume();
 await pendingResume;
 assert.equal(networkStorage.has("music-last-player"), true, "temporary outages retain the last room");
 assert.equal(retrying.nodes.get("room-error").textContent, "การเชื่อมต่อขัดข้อง กรุณาลองใหม่");
-assert.equal(retrying.nodes.get("start-btn").disabled, false);
-assert.equal(retrying.nodes.get("start-btn").hidden, false);
+assert.equal(retrying.nodes.get("resume-player").disabled, false);
+assert.equal(retrying.nodes.get("resume-player").hidden, false);
 networkDown = false;
-await retrying.nodes.get("start-btn").onclick();
+await retrying.nodes.get("resume-player").onclick();
 assert.equal(retrying.nodes.get("room-content").hidden, false);
-assert.equal(retrying.requests.length, 2);
+assert.equal(retrying.requests.length, 3);
 assert.equal(JSON.parse(sharedStorage.get("music-last-player")).token, "player-1", "leaving another tab cannot erase the latest Player record");
 console.log("PASS: Player entry/retry, tab credentials, persistent room resume/expiry/replacement/network retry/local leave, Admin and Guest admission, redirects and reconnect (DOM simulated).");

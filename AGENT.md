@@ -61,9 +61,11 @@ There is no frontend bundler or compilation step.
   through the IFrame API; Admin remains a controller rather than an audio source.
   New rooms start at 60% volume, applied before loading the first video, with
   Auto Queue enabled and a five-second request cooldown.
-- Root entry keeps its existing text and numeric keyboard hint. A three-digit room
-  number joins through the existing join API. Player entry is the room number
-  (`100–999`) followed by its digit sum without zero padding: `1236`, `78924`.
+- Root entry offers four cards after Start. A three-digit room number joins through
+  the existing join API. Two cards offer distinct unused numbers and create new Player
+  rooms. `POST /api/sessions/random` rejects a room number taken since it was offered.
+  The manual creation card accepts the three-digit room number (`100–999`). The
+  browser appends its digit sum without zero padding (`1236`, `78924`) for the API.
   `POST /api/sessions` takes `{ code }`, validates on the server, and atomically
   creates or reuses that room. `HOST_PASSWORD` is ignored and optional. Failed entry
   locks browser submission for five seconds; HTTP 429 carries the remaining retry time.
@@ -113,9 +115,10 @@ There is no frontend bundler or compilation step.
   Auto Queue uses regular YouTube WEB watch recommendations based on the latest
   video, preserving recommendation order and the 10-minute duration limit.
   Room nicknames survive refresh/reconnect within the same session.
-- Player entry shows the welcome screen first. Start reveals the shared credential
-  field with an accessible name and icon-only next button; successful creation opens
-  Player, and leaving restores welcome. Multiple Players share song/queue/pause/volume;
+- Player entry shows the welcome screen first. Start reveals the four cards, including
+  the latest-room shortcut on the manual creation card. The TV remote uses arrow keys
+  and OK on both screens. Successful creation opens Player,
+  and leaving restores welcome. Multiple Players share song/queue/pause/volume;
   a new Player starts the current song at its beginning, without position sync.
   Handle autoplay blocking with
   the existing play button without skipping tracks. Preserve playback-error handling,

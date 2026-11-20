@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { JukeboxState } from "./state.js";
 
 export const SESSION_TTL_MS = 60 * 60 * 1000;
@@ -12,10 +12,24 @@ export class Sessions {
     this.tokens = new Map();
   }
 
-  create(code) {
+  availableCodes(count) {
+    this.prune();
+    const available = [];
+    for (let number = 100; number <= 999; number++) {
+      const code = String(number);
+      if (!this.rooms.has(code)) available.push(code);
+    }
+    const choices = [];
+    while (choices.length < count && available.length) {
+      choices.push(available.splice(randomInt(available.length), 1)[0]);
+    }
+    return choices;
+  }
+
+  create(code, { reuse = true } = {}) {
     this.prune();
     if (typeof code !== "string" || code.length !== 3 || !/^[1-9][0-9]{2}$/.test(code)) return null;
-    if (this.rooms.has(code)) return this.rooms.get(code);
+    if (this.rooms.has(code)) return reuse ? this.rooms.get(code) : null;
     if (this.rooms.size === 900) return null;
     const room = {
       code, id: randomUUID(), state: new JukeboxState(),

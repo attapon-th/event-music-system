@@ -336,10 +336,62 @@ async function toggleFullscreen() {
   updateFullscreen();
 }
 
+const visibleControls = (controls) => [...controls].filter((el) => !el.disabled && el.getClientRects().length);
+
+function focusInDirection(key, from, controls) {
+  if (!from) return false;
+  const origin = from.getBoundingClientRect();
+  const vertical = key === "ArrowUp" || key === "ArrowDown";
+  const direction = key === "ArrowUp" || key === "ArrowLeft" ? -1 : 1;
+  const axis = vertical ? "y" : "x";
+  const cross = vertical ? "x" : "y";
+  const center = (rect, dimension) => dimension === "x" ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+  const candidates = controls.filter((el) => el !== from).map((el) => {
+    const rect = el.getBoundingClientRect();
+    const distance = direction * (center(rect, axis) - center(origin, axis));
+    return { el, distance, score: distance + 2 * Math.abs(center(rect, cross) - center(origin, cross)) };
+  }).filter(({ distance }) => distance > 1).sort((a, b) => a.score - b.score);
+  if (!candidates.length) return false;
+  candidates[0].el.focus();
+  return true;
+}
+
+function handleEntryKey(e, key, target) {
+  const entry = document.querySelector(".player-entry:not([hidden])");
+  if (!entry || e.defaultPrevented || target?.closest("dialog[open]")) return;
+  const card = target?.closest(".room-option");
+  const input = target?.tagName === "INPUT";
+  if (key.startsWith("Arrow")) {
+    const vertical = key === "ArrowUp" || key === "ArrowDown";
+    if (input && !vertical) return; // Keep the numeric field's cursor keys.
+    e.preventDefault();
+    if (vertical && card && card !== target && focusInDirection(key, target, visibleControls(card.querySelectorAll("input, button")))) return;
+    const controls = visibleControls(entry.querySelectorAll(".room-options-grid > .room-option, #start-btn, #install-app, #room-options-refresh"));
+    const from = card || target;
+    if (!focusInDirection(key, from, controls) && !controls.includes(from)) controls[0]?.focus();
+    return;
+  }
+  if (card && target !== card && ["Escape", "Back", "BrowserBack", "GoBack"].includes(key)) {
+    e.preventDefault();
+    card.focus();
+    return;
+  }
+  if (!["Enter", "Select", "Accept", "OK"].includes(key) || !entry.contains(target)) return;
+  if (input && e.key === "Enter") return; // Let the browser submit the form from a text field.
+  e.preventDefault();
+  if (e.repeat) return;
+  if (target.tagName === "BUTTON") target.click();
+  else if (input && target.validity.valid) target.form.requestSubmit();
+  else if (target === card) card.querySelector("input")?.focus();
+}
+
 function handleHostKey(e) {
-  if (!Room.token) return;
   const key = e.key && e.key !== "Unidentified" ? e.key : ({ 4: "BrowserBack", 19: "ArrowUp", 20: "ArrowDown", 21: "ArrowLeft", 22: "ArrowRight", 23: "Enter", 66: "Enter", 85: "MediaPlayPause", 87: "MediaTrackNext", 10009: "BrowserBack" })[e.keyCode] || "";
   const target = document.activeElement;
+  if (!Room.token) {
+    handleEntryKey(e, key, target);
+    return;
+  }
   const textInput = target?.matches('input:not([type="range"]), textarea, [contenteditable="true"]');
   if (["Escape", "Back", "BrowserBack", "GoBack", "Backspace"].includes(key) && isVideoFullscreen()) {
     e.preventDefault();
@@ -350,20 +402,8 @@ function handleHostKey(e) {
   if (key.startsWith("Arrow")) {
     if (target?.id === "volume" && ["ArrowLeft", "ArrowRight"].includes(key)) return;
     e.preventDefault();
-    const controls = isVideoFullscreen() ? [playerWrap] : [...document.querySelectorAll("button, input")].filter((el) => !el.disabled && el.getClientRects().length);
-    if (!controls.length) return;
-    const from = target?.getBoundingClientRect();
-    const vertical = key === "ArrowUp" || key === "ArrowDown";
-    const direction = key === "ArrowUp" || key === "ArrowLeft" ? -1 : 1;
-    const axis = vertical ? "y" : "x";
-    const cross = vertical ? "x" : "y";
-    const center = (rect, dimension) => dimension === "x" ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
-    const candidates = controls.filter((el) => el !== target).map((el) => {
-      const rect = el.getBoundingClientRect();
-      const distance = from ? direction * (center(rect, axis) - center(from, axis)) : 0;
-      return { el, distance, score: from ? distance + 2 * Math.abs(center(rect, cross) - center(from, cross)) : 0 };
-    }).filter(({ distance }) => distance > 1).sort((a, b) => a.score - b.score);
-    (candidates[0]?.el || (controls.includes(target) ? target : controls[0])).focus();
+    const controls = isVideoFullscreen() ? [playerWrap] : visibleControls(document.querySelectorAll("button, input"));
+    if (!focusInDirection(key, target, controls) && !controls.includes(target)) controls[0]?.focus();
     return;
   }
   if (["Enter", "Select", "Accept"].includes(key) && target?.tagName === "BUTTON") {

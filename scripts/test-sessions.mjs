@@ -8,9 +8,13 @@ const sessions = new Sessions({ cooldownSeconds: 15 }, {
 });
 const a = sessions.create("999");
 const b = sessions.create("100");
+const choices = sessions.availableCodes(2);
+assert.equal(new Set(choices).size, 2, "random choices use distinct room numbers");
+assert.ok(choices.every(code => !sessions.get(code)), "presenting choices leaves the rooms uncreated");
 assert.equal(a.code, "999");
 assert.equal(b.code, "100", "room creation uses the requested number");
 assert.equal(sessions.create("999"), a, "repeated creation returns the same live room");
+assert.equal(sessions.create("999", { reuse: false }), null, "exclusive creation cannot enter an occupied room");
 const player = sessions.issue(a, "player");
 const secondPlayer = sessions.issue(a, "player");
 assert.notEqual(secondPlayer.token, player.token);
@@ -49,7 +53,10 @@ assert.equal(replacement.primaryAdminId, null, "a reused room number starts with
 assert.equal(sessions.issue(replacement, "guest").role, "admin", "a replacement room chooses its own first Admin");
 assert.deepEqual(events.map(event => event.event), ["created", "created", "deleted", "deleted", "created"]);
 assert.ok(events.every(event => Object.keys(event).sort().join() === "at,event,room,sessionId"));
-for (let i = 100; i < 999; i++) sessions.create(String(i));
+for (let i = 100; i < 998; i++) sessions.create(String(i));
+assert.deepEqual(sessions.availableCodes(2), ["998"], "only the last free code is offered");
+sessions.create("998");
+assert.deepEqual(sessions.availableCodes(2), [], "capacity exhaustion yields no choices");
 assert.equal(sessions.rooms.size, 900);
 assert.equal(new Set(sessions.rooms.keys()).size, 900);
 assert.equal(sessions.create("999"), replacement, "an existing room can be entered at full capacity");

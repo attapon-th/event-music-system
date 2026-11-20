@@ -2,6 +2,7 @@
 const Room = (() => {
   const params = new URLSearchParams(location.search);
   const screen = document.body.dataset.screen || (document.body.dataset.admin === "true" ? "admin" : "guest");
+  const isPlayer = screen === "player";
   const content = document.getElementById("room-content");
   let current = null;
   let socket = null;
@@ -10,64 +11,47 @@ const Room = (() => {
   let stopped = false;
   let authenticated = false;
   const panel = document.createElement("section");
-  panel.className = `session-panel${screen === "player" ? " player-entry" : ""}`;
-  panel.innerHTML = `
-    <p id="room-error" role="status" aria-live="polite"></p>
-    <div id="room-welcome" class="start-card" ${screen === "player" ? "" : "hidden"}>
-      <img class="start-logo" src="/icons/qp.svg" width="104" height="104" alt="" aria-hidden="true">
-      <h1>${t("Event Music System")}</h1>
-      <p id="start-prompt">${t("Click to start the jukebox.")}</p>
-      <button id="start-btn" type="button">${t("▶  Start")}</button>
-      <form id="room-create" hidden>
-        <input id="entry-code" type="text" inputmode="numeric" pattern="[0-9]+" placeholder="${t("entryCredential")}" aria-label="${t("entryCredential")}" autocomplete="off" required>
-        <button type="submit" title="${t("next")}" aria-label="${t("next")}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 12h16m-7-7 7 7-7 7"/></svg></button>
-      </form>
-      <small>${t("Make sure this window's audio goes to the venue's AV system.")}</small>
-    </div>
-    <form id="room-join" ${screen === "player" ? "hidden" : ""}>
-      <h2>${t("joinRoom")}</h2>
+  panel.className = `session-panel${isPlayer ? " player-entry" : ""}`;
+  const joinForm = `
+    <form id="room-join" ${isPlayer ? 'class="room-option" tabindex="-1" aria-labelledby="join-room-title"' : ""}>
+      <h2 id="join-room-title">${t(isPlayer ? "joinRoomAction" : "joinRoom")}</h2>
       <label>${t("roomNumber")} <input id="room-code" type="text" inputmode="numeric" pattern="[1-9][0-9]{2}" maxlength="3" autocomplete="off" required></label>
       <button type="submit">${t("enterRoom")}</button>
-    </form>
+    </form>`;
+  panel.innerHTML = `
+    <p id="room-error" role="status" aria-live="polite"></p>
+    <div id="room-welcome" class="start-card" ${isPlayer ? "" : "hidden"}>
+      <img class="start-logo" src="/icons/qp.svg" width="104" height="104" alt="" aria-hidden="true">
+      <h1>${t("Event Music System")}</h1>
+      <p>${t("Click to start the jukebox.")}</p>
+      <button id="start-btn" type="button">${t("▶  Start")}</button>
+      <small>${t("Make sure this window's audio goes to the venue's AV system.")}</small>
+    </div>
+    ${isPlayer ? `
+      <section id="room-options" aria-labelledby="room-options-title" hidden>
+        <h1 id="room-options-title">${t("chooseRoom")}</h1>
+        <div class="room-options-grid">
+          ${joinForm}
+          ${[1, 2].map((number) => `
+            <button class="room-option random-room" id="random-room-${number}" type="button" disabled>
+              <span>${t("createMusicRoom")}</span>
+              <strong id="random-code-${number}">—</strong>
+            </button>`).join("")}
+          <div id="manual-room" class="room-option" role="group" aria-labelledby="manual-room-title" tabindex="-1">
+            <form id="room-create">
+              <h2 id="manual-room-title">${t("createRoomManually")}</h2>
+              <label>${t("roomNumber")} <input id="entry-code" type="text" inputmode="numeric" pattern="[1-9][0-9]{2}" maxlength="3" autocomplete="off" required></label>
+              <button type="submit">${t("createOrJoin")}</button>
+            </form>
+            <button id="resume-player" class="room-secondary" type="button" hidden></button>
+          </div>
+        </div>
+        <p id="room-options-status" role="status"></p>
+        <button id="room-options-refresh" class="room-secondary" type="button" hidden>${t("refreshRoomChoices")}</button>
+      </section>` : joinForm}
     <p id="room-retry" role="status" aria-live="polite"></p>`;
   document.body.prepend(panel);
   const node = (id) => document.getElementById(id);
-  function showPlayerEntry() {
-    node("start-btn").hidden = true;
-    node("start-prompt").hidden = true;
-    node("room-create").hidden = false;
-    node("entry-code").focus();
-  }
-  if (screen === "player") {
-    node("start-btn").onclick = async () => {
-      const button = node("start-btn");
-      if (button.disabled) return;
-      const previous = recentPlayer();
-      if (!previous) { showPlayerEntry(); return; }
-      button.disabled = true;
-      node("room-error").textContent = t("resumingPlayer");
-      try {
-        const member = await api("/api/info", {}, previous.token, previous.sessionId);
-        if (member.role !== "player" || member.code !== previous.code || member.sessionId !== previous.sessionId) {
-          const error = new Error(t("roomUnavailable"));
-          error.status = 401;
-          throw error;
-        }
-        remember(member);
-        applyState({ role: "player" });
-        history.replaceState(null, "", url("player"));
-        node("room-error").textContent = "";
-        Room.onJoined?.();
-      } catch (error) {
-        node("room-error").textContent = error.status ? error.message : t("networkError");
-        if ([401, 403, 410].includes(error.status)) {
-          forgetPlayer(previous);
-          showPlayerEntry();
-        }
-      } finally { button.disabled = false; }
-    };
-    node("start-btn").focus();
-  }
   if (content) content.hidden = true;
   document.body.dataset.roomActive = "false";
   node("room-code").value = params.get("room") || "";
@@ -144,11 +128,11 @@ const Room = (() => {
     panel.hidden = false;
     document.body.dataset.roomActive = "false";
     if (content) content.hidden = true;
-    if (screen === "player") {
-      node("room-create").hidden = true;
+    if (isPlayer) {
+      node("room-options").hidden = true;
+      node("room-welcome").hidden = false;
+      node("room-code").value = "";
       node("entry-code").value = "";
-      node("start-btn").hidden = false;
-      node("start-prompt").hidden = false;
       node("start-btn").focus();
     }
     node("room-error").textContent = message;
@@ -172,7 +156,7 @@ const Room = (() => {
     } });
     const data = await response.json();
     if (!response.ok) {
-      if (data.code === "SESSION_INVALID") unavailable(data.error);
+      if (data.code === "SESSION_INVALID" && current) unavailable(data.error);
       const error = new Error(data.error || data.reason || t("roomActionFailed"));
       error.status = response.status;
       error.retryIn = data.retryIn;
@@ -227,51 +211,137 @@ const Room = (() => {
     }
     return false;
   }
-  function submit(form, action) {
-    const button = form.querySelector('button[type="submit"]');
-    let busy = false;
-    let retryUntil = 0;
-    function countdown() {
-      const left = Math.max(0, Math.ceil((retryUntil - Date.now()) / 1000));
-      button.disabled = busy || left > 0;
-      node("room-retry").textContent = left ? t("entryRetry", { seconds: left }) : "";
-      if (left) setTimeout(countdown, Math.min(1000, retryUntil - Date.now()));
-    }
-    form.onsubmit = async (event) => {
-      event.preventDefault();
-      if (busy || Date.now() < retryUntil) return;
-      busy = true;
-      button.disabled = true;
-      node("room-error").textContent = "";
-      try { await action(); } catch (error) {
-        node("room-error").textContent = error.message;
-        if ([400, 401, 410, 429].includes(error.status)) {
-          const seconds = Number(error.retryIn);
-          const wait = error.status === 429 && Number.isFinite(seconds) && seconds > 0 ? seconds : 5;
-          retryUntil = Date.now() + wait * 1000;
-        }
+  const joinFormNode = node("room-join");
+  const entryButtons = [joinFormNode.querySelector('button[type="submit"]')];
+  const randomButtons = isPlayer ? [node("random-room-1"), node("random-room-2")] : [];
+  let randomCodes = [];
+  let optionsRequest = 0;
+  let busy = false;
+  let retryUntil = 0;
+  function updateEntryButtons() {
+    const locked = busy || Date.now() < retryUntil;
+    for (const button of entryButtons) button.disabled = locked;
+    randomButtons.forEach((button, index) => { button.disabled = locked || !randomCodes[index]; });
+  }
+  function countdown() {
+    updateEntryButtons();
+    const remaining = retryUntil - Date.now();
+    node("room-retry").textContent = remaining > 0 ? t("entryRetry", { seconds: Math.ceil(remaining / 1000) }) : "";
+    if (remaining > 0) setTimeout(countdown, Math.min(1000, remaining));
+  }
+  async function runEntry(action) {
+    if (busy || Date.now() < retryUntil) return;
+    busy = true;
+    updateEntryButtons();
+    node("room-error").textContent = "";
+    try { await action(); } catch (error) {
+      node("room-error").textContent = error.message;
+      if ([400, 401, 410, 429].includes(error.status)) {
+        const seconds = Number(error.retryIn);
+        const wait = error.status === 429 && Number.isFinite(seconds) && seconds > 0 ? seconds : 5;
+        retryUntil = Date.now() + wait * 1000;
       }
-      finally { busy = false; countdown(); }
+    } finally {
+      busy = false;
+      countdown();
+    }
+  }
+  function submit(form, action) {
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      return runEntry(action);
     };
   }
-  submit(node("room-create"), async () => {
-    const code = node("entry-code").value.trim();
-    if (/^[1-9][0-9]{2}$/.test(code)) {
-      remember(await post("/api/sessions/join", { code }, saved(code, null, false)));
-      location.replace(url(privileged() ? "admin" : "guest"));
-      return;
-    }
-    remember(await post("/api/sessions", { code }));
+  function openPlayer(member) {
+    remember(member);
     node("entry-code").value = "";
     applyState({ role: "player" });
     history.replaceState(null, "", url("player"));
     Room.onJoined?.(); // Keep the creation gesture in this document for browser audio.
-  });
-  submit(node("room-join"), async () => {
+  }
+  async function loadRoomOptions() {
+    const request = ++optionsRequest;
+    const status = node("room-options-status");
+    const refresh = node("room-options-refresh");
+    randomCodes = [];
+    randomButtons.forEach((_, index) => { node(`random-code-${index + 1}`).textContent = "—"; });
+    updateEntryButtons();
+    refresh.hidden = true;
+    status.textContent = t("loadingRoomChoices");
+    try {
+      const { codes } = await api("/api/sessions/available");
+      if (request !== optionsRequest) return;
+      randomCodes = codes;
+      randomButtons.forEach((_, index) => { node(`random-code-${index + 1}`).textContent = codes[index] || "—"; });
+      status.textContent = codes.length ? "" : t("noRoomChoices");
+      refresh.hidden = codes.length > 0;
+    } catch (error) {
+      if (request !== optionsRequest) return;
+      status.textContent = error.status ? error.message : t("networkError");
+      refresh.hidden = false;
+    } finally {
+      if (request === optionsRequest) updateEntryButtons();
+    }
+  }
+  submit(joinFormNode, async () => {
     const code = node("room-code").value;
     remember(await post("/api/sessions/join", { code }, saved(code, null, false)));
     location.replace(url(privileged() ? "admin" : "guest"));
   });
+  if (isPlayer) {
+    const createForm = node("room-create");
+    const resumeButton = node("resume-player");
+    entryButtons.push(createForm.querySelector('button[type="submit"]'), resumeButton);
+    submit(createForm, async () => {
+      const roomNumber = node("entry-code").value;
+      const digitSum = [...roomNumber].reduce((sum, digit) => sum + Number(digit), 0);
+      openPlayer(await post("/api/sessions", { code: `${roomNumber}${digitSum}` }));
+    });
+    randomButtons.forEach((button, index) => {
+      button.onclick = () => {
+        const code = randomCodes[index];
+        if (!code) return;
+        return runEntry(async () => {
+          try { openPlayer(await post("/api/sessions/random", { code })); }
+          catch (error) {
+            if (error.status === 409) void loadRoomOptions();
+            throw error;
+          }
+        });
+      };
+    });
+    resumeButton.onclick = () => runEntry(async () => {
+      const previous = recentPlayer();
+      if (!previous) { resumeButton.hidden = true; return; }
+      const status = node("room-error");
+      status.textContent = t("resumingPlayer");
+      try {
+        const member = await api("/api/info", {}, previous.token, previous.sessionId);
+        if (member.role === "player" && member.code === previous.code && member.sessionId === previous.sessionId) {
+          status.textContent = "";
+          openPlayer(member);
+          return;
+        }
+        status.textContent = t("roomUnavailable");
+      } catch (error) {
+        status.textContent = error.status ? error.message : t("networkError");
+        if (![401, 403, 410].includes(error.status)) return;
+      }
+      forgetPlayer(previous);
+      resumeButton.hidden = true;
+    });
+    node("room-options-refresh").onclick = loadRoomOptions;
+    node("start-btn").onclick = () => {
+      const previous = recentPlayer();
+      resumeButton.hidden = !previous;
+      if (previous) resumeButton.textContent = t("resumeLatestRoom", { code: previous.code });
+      node("room-welcome").hidden = true;
+      node("room-options").hidden = false;
+      joinFormNode.focus();
+      return loadRoomOptions();
+    };
+    node("start-btn").focus();
+  }
   async function init() {
     const code = params.get("room");
     if (!code) return false;

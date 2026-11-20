@@ -65,14 +65,9 @@ cp .env.example .env      # configure PUBLIC_URL for your deployment
 bun start
 ```
 
-Open **http://localhost:45416/** on the machine, drag it to the projector, and
-press **เริ่มเล่น**, enter a room number (`100–999`) followed by the sum of its digits,
-then press the arrow icon. Examples: `1001`, `1236`, `78924`, `99927`; do not pad the sum with zeros.
-This creates the specified room or opens another Player in the existing room.
-A three-digit room number joins the room, preserving any saved
-Admin/Controller role. The first participant goes straight to Admin at `/a`;
-later participants enter Guest. The entry displays digits openly and uses a numeric keyboard
-on mobile. No creation password is required; any legacy `HOST_PASSWORD` is ignored.
+Open **http://localhost:45416/** on the machine, drag it to the projector, and press **เริ่มเล่น** to see four cards. Either **สร้างห้องเล่นเพลง** card uses a suggested free three-digit number and opens the Player. To create or join a specific Player room, enter its three-digit number (`100–999`) on **สร้างห้องเอง**. The same card offers a shortcut back to the last Player room when available.
+
+**เข้าร่วม** takes the three-digit room number and preserves any saved Admin/Controller role. The first participant goes straight to Admin at `/a`, and later participants enter Guest. Both forms use a numeric keyboard on mobile. On a TV remote, use the arrow keys to move and OK to select. The legacy `HOST_PASSWORD` is ignored.
 New rooms start at **60% volume**. If the browser blocks audio, use its existing
 play button. The QR is hidden when the Player opens. Press **แสดง QR** to let
 guests scan it, or guests can join directly at `/guest`.
@@ -111,12 +106,14 @@ player metadata, search, segmented controls, bottom navigation, empty states แ
 
 | Path | Purpose |
 |------|---------|
-| `/` | Shared room entry: create/join Player with the digit-sum code, or join as a participant with three digits |
+| `/` | Four-card entry: join as a participant, choose either suggested free room for Player, or create/join a specific Player room |
 | `/guest` | Mobile page guests open via the QR |
 | `/explore` | Alias of the Guest page with Thailand charts on first load |
 | `/a` | Admin/Controller controls, queue editing and participant roster |
 | `/g` | Redirect to `/guest`, preserving room/session query parameters |
 | `POST /api/sessions` | `{ code: "1236" }` → create/reuse room `123` and issue a Player credential; concurrent requests reuse one room |
+| `GET /api/sessions/available` | Returns `{ codes }` with up to two distinct unused room numbers |
+| `POST /api/sessions/random` | `{ code: "234" }` → create a new room and issue a Player credential, or return `409` if the room number is already used |
 | `POST /api/sessions/join` | `{ code, sessionId? }` → first participant becomes Admin automatically, later participants become Guests; reuses a valid member credential |
 | `POST /api/sessions/close` | Player credential → delete room and disconnect everyone |
 | `GET /api/search?q=&mode=songs\|karaoke\|videos` | YouTube Music songs, karaoke or videos (no API key); video queries are unchanged and results keep YouTube order, including live and long videos |
@@ -131,7 +128,7 @@ Rooms expire after the last connection has been gone for 60 minutes. A connected
 idle page keeps its room alive; heartbeat detects dead connections. A restart
 clears every room. Run one server process, with at most 900 concurrent rooms.
 Active Player credentials use per-tab `sessionStorage`; the browser also remembers its
-last Player room and credential for validation after pressing Start on a future visit.
+last Player room and credential for validation when the user selects the resume button on **สร้างห้องเอง**.
 Explicit Leave forgets that matching record; expired/replaced rooms require entry again.
 Participant credentials retain
 `localStorage`. Opening another Player never disconnects existing ones, even
@@ -295,15 +292,14 @@ DEFAULT_REGION=TH
 DEFAULT_LOCALE=th-TH
 ```
 
-เปิด `/` บน TV/TV Box จะเห็นโลโก้ qp กด **เริ่มเล่น** จึงแสดงช่อง **รหัสสร้างห้องหรือเลขห้อง**
-รหัสสร้าง/เข้า Player คือเลขห้อง `100–999` ต่อท้ายผลบวกแต่ละหลัก โดยไม่เติมศูนย์นำหน้าผลบวก
-เช่น `1001`, `1236`, `78924`, `99927` ถ้ายังไม่มีห้องจะสร้างตามเลขที่ระบุ ถ้ามีแล้วจะเข้า Player ร่วมกัน
-ตรวจรหัสที่ server; คำขอสร้างเลขเดียวกันพร้อมกันใช้ห้องเดียว ไม่สุ่มเลขห้อง
-ไม่ต้องตั้ง `HOST_PASSWORD` และค่าเดิมไม่มีผล ข้อความหน้าเข้าห้องยังเหมือนเดิม
-ช่องกรอกแสดงตัวเลขตามปกติและใช้คีย์บอร์ดตัวเลขบนมือถือ
-ช่องเดียวกันรับเลขห้อง 3 หลักเพื่อเข้า Guest หรือกลับ Admin/Controller ตามสิทธิ์เดิม
-ใช้ placeholder พร้อมชื่อสำหรับ accessibility และปุ่มไอคอนลูกศรต่อไป
-กรอกรหัสหรือเลขห้องผิดจะล็อกการส่งซ้ำ 5 วินาทีพร้อมนับถอยหลัง ทั้งปุ่มและ Enter
+เปิด `/` บน TV/TV Box แล้วกด **เริ่มเล่น** จะเห็นการ์ด 4 ใบ เรียง 2 × 2 บนจอกว้างและคอลัมน์เดียวบนมือถือ
+
+- **เข้าร่วม** กรอกเลขห้อง 3 หลักเพื่อเข้า Guest หรือกลับ Admin/Controller ตามสิทธิ์เดิม
+- **สร้างห้องเล่นเพลง** สองใบกลางแสดงเลขห้องว่างที่สุ่มมาโดยไม่ซ้ำกัน กดแล้วสร้างเฉพาะห้องที่เลือกและเปิดจอเล่นเพลงทันที เมื่อเลขนั้นถูกใช้ระหว่างเลือก ระบบจะแสดงตัวเลือกใหม่
+- **สร้างห้องเอง** กรอกเลขห้อง `100–999` เพื่อสร้างห้องและเปิดจอเล่นเพลง ถ้ามีห้องแล้วจะเปิด Player เพิ่มในห้องเดิม
+
+ทั้งสองช่องใช้คีย์บอร์ดตัวเลขบนมือถือ บน TV Box ใช้ลูกศรเลื่อนระหว่างการ์ด กด OK เพื่อเลือกหรือเปิดช่องกรอกเลข และใช้ลูกศรลงเพื่อไปยังปุ่มส่ง
+หากเซิร์ฟเวอร์ปฏิเสธเลขที่ส่ง ระบบจะแสดงเวลารอส่งซ้ำ ทั้งปุ่มและ Enter
 ยังแก้ข้อความระหว่างรอได้ ปัญหาเครือข่ายไม่เริ่ม cooldown นี้
 เมื่อสร้างสำเร็จ Player เปิดทันที ห้องใหม่เริ่มที่ระดับเสียง **60%**
 หาก browser บล็อกเสียง ให้กดปุ่มเล่นเดิม; ระบบไม่ข้ามเพลงเพราะถูกบล็อก autoplay
@@ -326,9 +322,9 @@ Controller ควบคุมเพลงและการตั้งค่า
 เวลารอเพิ่มเพลงเริ่มต้นที่ **5 วินาที** ปุ่มเวลารอแสดงค่าในปุ่มโดยตรง ไม่มี label การตั้งค่าด้านล่าง
 ปุ่ม **ออก** หยุดเสียงและตัดการเชื่อมต่อเฉพาะ Player หน้านั้น แล้วกลับหน้าเริ่ม ห้องและเครื่องอื่นยังอยู่
 Player เก็บกุญแจที่ใช้งานใน `sessionStorage` แยกแต่ละแท็บ และจำห้องล่าสุดพร้อม Session ID/กุญแจใน `localStorage`
-เมื่อเปิดหน้าแรกใหม่แล้วกด **เริ่ม** จะตรวจ `/api/info` ก่อนเข้าห้องเดิมโดยไม่ต้องกรอกรหัส
-หากห้องหมดอายุ ถูกลบ หรือเลขห้องถูกใช้ใหม่ จะลืมข้อมูลเดิมและเปิดช่องรหัส โดยไม่สร้างห้องอัตโนมัติ
-เครือข่ายขัดข้องชั่วคราวยังจำห้องไว้เพื่อกดเริ่มลองใหม่ได้ การกด **ออก** ลืมข้อมูลกลับเข้าห้องนั้นโดยไม่ตัด Player อื่น
+หลังเปิดหน้าแรกแล้วกด **เริ่มเล่น** เลือก **กลับเข้าห้องล่าสุด** บนการ์ด **สร้างห้องเอง** ระบบจะตรวจ `/api/info` ก่อนเปิดห้องเดิม
+หากห้องหมดอายุ ถูกลบ หรือเลขห้องถูกใช้ใหม่ ระบบจะลืมข้อมูลเดิมและให้เลือกห้องจากการ์ดได้อีกครั้ง
+เครือข่ายขัดข้องชั่วคราวยังจำห้องไว้เพื่อให้ลองใหม่ได้ การกด **ออก** ลืมข้อมูลกลับเข้าห้องนั้นโดยไม่ตัด Player อื่น
 ผู้เข้าร่วมยังใช้ `localStorage` ตามเดิม
 
 ข้อมูลทุกห้องอยู่ใน memory ของ server ลบหลังไม่มีอุปกรณ์เชื่อมต่อครบ 60 นาที
@@ -412,6 +408,7 @@ iPhone/iPad ใช้ปุ่ม **เพิ่มไปยังหน้า�
 
 Room APIs คืน `{ code, sessionId, token, role, memberId }` โดยไม่ใช้ `/api/host-token` หรือ Basic Auth
 `POST /api/sessions` รับ `{ code: "1236" }` และคืนเลขห้องสามหลักกับกุญแจ Player ใหม่ โดยใช้ session ID เดิมหากห้องมีอยู่
+`GET /api/sessions/available` สุ่มเลขห้องว่างได้สูงสุดสองเลข `POST /api/sessions/random` รับเลขที่เลือกและสร้างห้องใหม่ หากมีห้องนั้นอยู่แล้วจะคืน HTTP 409
 ส่ง `Authorization: Bearer TOKEN` สำหรับ `/api/info`, `/api/request`, การกลับเข้าห้องด้วยสิทธิ์เดิม และการปิดห้อง
 ส่ง `X-Session-Id` เพิ่มได้เพื่อยืนยันว่ากุญแจตรงกับห้องที่ต้องการ
 การกรอกเลขหรือรหัสผิดรวม 10 ครั้งต่อนาทีต่อ IP จะถูกปฏิเสธชั่วคราวด้วย HTTP 429
@@ -471,7 +468,7 @@ Player หลายเครื่อง รายงานจบซ้ำ/ID �
 พร้อมตรวจปุ่มและสถานะบน Player/Admin/Guest โดยจำลอง YouTube และ DOM
 รวม disconnect ระหว่างเล่น, เล่นคิวต่อขณะ offline, reconnect พร้อมซิงก์เพลงที่จบโดยไม่เล่นซ้ำ,
 เพลงจบระหว่างรอ auth, ห้องหายแล้วรอคิวหมด, และชื่อใหม่เมื่อเปลี่ยน session
-รวมช่องเข้าห้องเดียว, เวลารอ 5 วินาที/HTTP 429, การข้ามแท็บผู้เข้าร่วมที่ถูกซ่อน,
+รวมการ์ดเข้าห้องและสร้างห้อง, เลขสุ่มชนกัน, เวลารอ 5 วินาที/HTTP 429, การข้ามแท็บผู้เข้าร่วมที่ถูกซ่อน,
 ลบก่อน/ครบห้าวินาที ยกเลิก หลายเพลงพร้อมกัน คิวเปลี่ยนระหว่างรอ และยกเลิกเมื่อออกจากหน้า/เสียสิทธิ์/หลุดการเชื่อมต่อ,
 เพลงแนะนำใช้ชาร์ตประเทศทุกโหมดโดยไม่มีปุ่มหมวด, การแบ่งผลชาร์ต/สุ่ม/กันซ้ำ/ลองใหม่ และ manifest/ขนาดไอคอน/flow ติดตั้งโดยจำลอง browser events
 

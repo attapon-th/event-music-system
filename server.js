@@ -107,15 +107,30 @@ function requireMember(req, res, next) {
 function memberInfo(member) {
   return { code: member.room.code, sessionId: member.room.id, token: member.token, role: member.role, memberId: member.id };
 }
-app.post("/api/sessions", checkAttempts, requirePlayerCode, (req, res) => {
-  const room = sessions.create(req.roomCode);
-  if (!room) return res.status(409).json({ error: "ห้องเต็ม กรุณาลองใหม่ภายหลัง" });
+function openPlayer(room, res) {
   room.onMembersChange = () => broadcastState(room);
   room.state.onChange = () => {
     broadcastState(room);
     updateAutoQueue(room, () => sessions.get(room.code, room.id) === room, youtubeOptions);
   };
   res.set("Cache-Control", "no-store").json(memberInfo(sessions.issue(room, "player")));
+}
+app.get("/api/sessions/available", (_req, res) => {
+  res.set("Cache-Control", "no-store").json({ codes: sessions.availableCodes(2) });
+});
+app.post("/api/sessions/random", checkAttempts, (req, res) => {
+  const { code } = req.body || {};
+  if (typeof code !== "string" || code.length !== 3 || !/^[1-9][0-9]{2}$/.test(code)) {
+    return fail(req, res, 400, "กรุณากรอกเลขห้อง 3 หลัก");
+  }
+  const room = sessions.create(code, { reuse: false });
+  if (!room) return res.status(409).json({ error: "เลขห้องนี้ถูกใช้แล้ว กรุณาเลือกเลขใหม่" });
+  openPlayer(room, res);
+});
+app.post("/api/sessions", checkAttempts, requirePlayerCode, (req, res) => {
+  const room = sessions.create(req.roomCode);
+  if (!room) return res.status(409).json({ error: "ห้องเต็ม กรุณาลองใหม่ภายหลัง" });
+  openPlayer(room, res);
 });
 app.post("/api/sessions/join", checkAttempts, findRoom, (req, res) => {
   const saved = sessions.authenticate(tokenFrom(req), req.room.id);
