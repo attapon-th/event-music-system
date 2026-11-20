@@ -533,7 +533,9 @@ try {
   assert.equal(available.headers.get("cache-control"), "no-store");
   const { codes } = await available.json();
   assert.equal(new Set(codes).size, 2);
-  assert.equal((await post("/api/sessions/join", { code: codes[0] })).status, 410, "choices are offered before a room exists");
+  const missingRoom = await post("/api/sessions/join", { code: codes[0] });
+  assert.equal(missingRoom.status, 410, "choices are offered before a room exists");
+  assert.deepEqual(await missingRoom.json(), { error: "ไม่มีห้องนี้", retryIn: 5 });
   const competing = await Promise.all(codes.map(() => post("/api/sessions/random", { code: codes[0] })));
   assert.deepEqual(competing.map(response => response.status).sort(), [200, 409], "only one request can create a given random room");
   const randomRoom = await competing.find(response => response.ok).json();

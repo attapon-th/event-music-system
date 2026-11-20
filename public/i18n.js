@@ -44,9 +44,9 @@ const UI_MESSAGES = { th: {
 
   "joinRoom": "เข้าห้องเดิม",
   "chooseRoom": "เลือกห้องเล่นเพลง",
-  "joinRoomAction": "เข้าร่วม",
+  "joinMusicQueue": "เข้าร่วมจัดคิวเพลง",
   "createMusicRoom": "สร้างห้องเล่นเพลง",
-  "createRoomManually": "สร้างห้องเอง",
+  "createOrJoinPlayer": "สร้างหรือเข้าร่วมเครื่องเล่น",
   "createOrJoin": "สร้างหรือเข้าร่วม",
   "loadingRoomChoices": "กำลังหาเลขห้องว่าง…",
   "noRoomChoices": "ขณะนี้ไม่มีเลขห้องว่าง",

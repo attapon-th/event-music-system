@@ -329,8 +329,9 @@ try {
   await playerPage.key('Enter');
   await playerPage.wait('!document.querySelector("#random-room-2").disabled');
   assert.equal(await playerPage.eval('document.activeElement.id'), 'room-join');
-  assert.equal(await playerPage.eval('document.querySelector("#join-room-title").textContent'), 'เข้าร่วม');
-  assert.equal(await playerPage.eval('document.querySelector("#manual-room-title").textContent'), 'สร้างห้องเอง');
+  assert.equal(await playerPage.eval('document.querySelector("#join-room-title").textContent'), 'เข้าร่วมจัดคิวเพลง');
+  assert.equal(await playerPage.eval('document.querySelector("#manual-room-title").textContent'), 'สร้างหรือเข้าร่วมเครื่องเล่น');
+  assert.equal(await playerPage.eval('document.querySelector("#room-create button").textContent'), 'สร้างหรือเข้าร่วม');
   await playerPage.key('ArrowDown');
   assert.equal(await playerPage.eval('document.activeElement.id'), 'random-room-2');
   await playerPage.key('ArrowUp');
@@ -389,10 +390,15 @@ try {
   const invalidated = await page('/', false, playerContext);
   await invalidated.eval(`localStorage.setItem("music-last-player", JSON.stringify({code:"456",sessionId:${JSON.stringify(playerSession)},token:${JSON.stringify(previousToken)}}))`);
   await invalidated.click('#start-btn');
+  await invalidated.wait('!document.querySelector("#random-room-1").disabled');
   await invalidated.click('#resume-player');
   await invalidated.wait('document.querySelector("#resume-player").hidden');
   assert.equal(await invalidated.eval('document.body.dataset.roomActive'), 'false');
   assert.equal(await invalidated.eval('localStorage.getItem("music-last-player")'), null);
+  await invalidated.eval('document.querySelector("#room-code").value = document.querySelector("#random-code-1").textContent');
+  await invalidated.click('#room-join button');
+  await invalidated.wait('document.querySelector("#room-error").textContent === "ไม่มีห้องนี้"');
+  assert.equal(await invalidated.eval('location.pathname'), '/');
   const randomPlayer = await page('/', false);
   await randomPlayer.click('#start-btn', true);
   await randomPlayer.wait('!document.querySelector("#random-room-2").disabled');

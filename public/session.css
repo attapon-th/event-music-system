@@ -25,14 +25,20 @@ body[data-screen="player"][data-room-active="false"] { overflow-y: auto; }
 #room-options { width: min(100%, 720px); }
 #room-options-title { margin-bottom: 16px; color: var(--text-hi); font: 700 clamp(1.6rem, 5vw, 2.2rem)/1.3 var(--serif); }
 .room-options-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.room-options-grid .room-option { margin: 0; padding: 16px; min-width: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text-hi); }
+.room-options-grid .room-option { --room-accent: var(--gold); margin: 0; padding: 16px; min-width: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--text-hi); }
+.room-options-grid #room-join { --room-accent: oklch(82% 0.065 320); }
+.room-options-grid #random-room-2 { --room-accent: var(--warm-soft); }
+.room-options-grid #manual-room { --room-accent: oklch(80% 0.095 40); }
 .room-options-grid .room-option:focus { outline: 3px solid var(--gold); outline-offset: 3px; }
 .room-option h2 { font: 700 1.2rem/1.4 var(--sans); }
+.room-option-title { display: flex; align-items: center; gap: 8px; }
+.room-option-icon { display: grid; flex-shrink: 0; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--fill); color: var(--room-accent); font: 600 1.1rem/1 sans-serif; }
+.room-option-icon::before { content: attr(data-icon); }
 .room-option form { margin: 0; }
 .room-option label { color: var(--warm-soft); }
 .room-options-grid .random-room { display: grid; justify-items: center; align-content: center; gap: 4px; min-height: 112px; border-color: var(--fill-hover); font-weight: 600; }
 .room-options-grid .random-room:hover:not(:disabled) { background: var(--fill-hover); }
-.random-room strong { color: var(--gold); font-size: 2.1rem; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.random-room strong { color: var(--room-accent); font-size: 2.1rem; font-variant-numeric: tabular-nums; line-height: 1.2; }
 #room-options .room-secondary { margin-top: 10px; background: transparent; color: var(--gold); }
 #room-options-status { margin-top: 10px; color: var(--warm-soft); }
 #room-options-status:empty { margin-top: 0; }

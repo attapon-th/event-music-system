@@ -65,9 +65,9 @@ cp .env.example .env      # configure PUBLIC_URL for your deployment
 bun start
 ```
 
-Open **http://localhost:45416/** on the machine, drag it to the projector, and press **เริ่มเล่น** to see four cards. Either **สร้างห้องเล่นเพลง** card uses a suggested free three-digit number and opens the Player. To create or join a specific Player room, enter its three-digit number (`100–999`) on **สร้างห้องเอง**. The same card offers a shortcut back to the last Player room when available.
+Open **http://localhost:45416/** on the machine, drag it to the projector, and press **เริ่มเล่น** to see four cards. Either **สร้างห้องเล่นเพลง** card uses a suggested free three-digit number and opens the Player. To create or join a specific Player room, enter its three-digit number (`100–999`) on **สร้างหรือเข้าร่วมเครื่องเล่น**. The same card offers a shortcut back to the last Player room when available.
 
-**เข้าร่วม** takes the three-digit room number and preserves any saved Admin/Controller role. The first participant goes straight to Admin at `/a`, and later participants enter Guest. Both forms use a numeric keyboard on mobile. On a TV remote, use the arrow keys to move and OK to select. The legacy `HOST_PASSWORD` is ignored.
+**เข้าร่วมจัดคิวเพลง** takes the three-digit room number and preserves any saved Admin/Controller role. The first participant goes straight to Admin at `/a`, and later participants enter Guest. If the room is missing, the page displays **ไม่มีห้องนี้**. Both forms use a numeric keyboard on mobile. On a TV remote, use the arrow keys to move and OK to select. The legacy `HOST_PASSWORD` is ignored.
 New rooms start at **60% volume**. If the browser blocks audio, use its existing
 play button. The QR is hidden when the Player opens. Press **แสดง QR** to let
 guests scan it, or guests can join directly at `/guest`.
@@ -128,7 +128,7 @@ Rooms expire after the last connection has been gone for 60 minutes. A connected
 idle page keeps its room alive; heartbeat detects dead connections. A restart
 clears every room. Run one server process, with at most 900 concurrent rooms.
 Active Player credentials use per-tab `sessionStorage`; the browser also remembers its
-last Player room and credential for validation when the user selects the resume button on **สร้างห้องเอง**.
+last Player room and credential for validation when the user selects the resume button on **สร้างหรือเข้าร่วมเครื่องเล่น**.
 Explicit Leave forgets that matching record; expired/replaced rooms require entry again.
 Participant credentials retain
 `localStorage`. Opening another Player never disconnects existing ones, even
@@ -294,9 +294,9 @@ DEFAULT_LOCALE=th-TH
 
 เปิด `/` บน TV/TV Box แล้วกด **เริ่มเล่น** จะเห็นการ์ด 4 ใบ เรียง 2 × 2 บนจอกว้างและคอลัมน์เดียวบนมือถือ
 
-- **เข้าร่วม** กรอกเลขห้อง 3 หลักเพื่อเข้า Guest หรือกลับ Admin/Controller ตามสิทธิ์เดิม
+- **เข้าร่วมจัดคิวเพลง** กรอกเลขห้อง 3 หลักเพื่อเข้า Guest หรือกลับ Admin/Controller ตามสิทธิ์เดิม หากไม่พบจะแจ้ง **ไม่มีห้องนี้**
 - **สร้างห้องเล่นเพลง** สองใบกลางแสดงเลขห้องว่างที่สุ่มมาโดยไม่ซ้ำกัน กดแล้วสร้างเฉพาะห้องที่เลือกและเปิดจอเล่นเพลงทันที เมื่อเลขนั้นถูกใช้ระหว่างเลือก ระบบจะแสดงตัวเลือกใหม่
-- **สร้างห้องเอง** กรอกเลขห้อง `100–999` เพื่อสร้างห้องและเปิดจอเล่นเพลง ถ้ามีห้องแล้วจะเปิด Player เพิ่มในห้องเดิม
+- **สร้างหรือเข้าร่วมเครื่องเล่น** กรอกเลขห้อง `100–999` เพื่อสร้างห้องและเปิดจอเล่นเพลง ถ้ามีห้องแล้วจะเปิด Player เพิ่มในห้องเดิม
 
 ทั้งสองช่องใช้คีย์บอร์ดตัวเลขบนมือถือ บน TV Box ใช้ลูกศรเลื่อนระหว่างการ์ด กด OK เพื่อเลือกหรือเปิดช่องกรอกเลข และใช้ลูกศรลงเพื่อไปยังปุ่มส่ง
 หากเซิร์ฟเวอร์ปฏิเสธเลขที่ส่ง ระบบจะแสดงเวลารอส่งซ้ำ ทั้งปุ่มและ Enter
@@ -322,7 +322,7 @@ Controller ควบคุมเพลงและการตั้งค่า
 เวลารอเพิ่มเพลงเริ่มต้นที่ **5 วินาที** ปุ่มเวลารอแสดงค่าในปุ่มโดยตรง ไม่มี label การตั้งค่าด้านล่าง
 ปุ่ม **ออก** หยุดเสียงและตัดการเชื่อมต่อเฉพาะ Player หน้านั้น แล้วกลับหน้าเริ่ม ห้องและเครื่องอื่นยังอยู่
 Player เก็บกุญแจที่ใช้งานใน `sessionStorage` แยกแต่ละแท็บ และจำห้องล่าสุดพร้อม Session ID/กุญแจใน `localStorage`
-หลังเปิดหน้าแรกแล้วกด **เริ่มเล่น** เลือก **กลับเข้าห้องล่าสุด** บนการ์ด **สร้างห้องเอง** ระบบจะตรวจ `/api/info` ก่อนเปิดห้องเดิม
+หลังเปิดหน้าแรกแล้วกด **เริ่มเล่น** เลือก **กลับเข้าห้องล่าสุด** บนการ์ด **สร้างหรือเข้าร่วมเครื่องเล่น** ระบบจะตรวจ `/api/info` ก่อนเปิดห้องเดิม
 หากห้องหมดอายุ ถูกลบ หรือเลขห้องถูกใช้ใหม่ ระบบจะลืมข้อมูลเดิมและให้เลือกห้องจากการ์ดได้อีกครั้ง
 เครือข่ายขัดข้องชั่วคราวยังจำห้องไว้เพื่อให้ลองใหม่ได้ การกด **ออก** ลืมข้อมูลกลับเข้าห้องนั้นโดยไม่ตัด Player อื่น
 ผู้เข้าร่วมยังใช้ `localStorage` ตามเดิม
@@ -409,6 +409,7 @@ iPhone/iPad ใช้ปุ่ม **เพิ่มไปยังหน้า�
 Room APIs คืน `{ code, sessionId, token, role, memberId }` โดยไม่ใช้ `/api/host-token` หรือ Basic Auth
 `POST /api/sessions` รับ `{ code: "1236" }` และคืนเลขห้องสามหลักกับกุญแจ Player ใหม่ โดยใช้ session ID เดิมหากห้องมีอยู่
 `GET /api/sessions/available` สุ่มเลขห้องว่างได้สูงสุดสองเลข `POST /api/sessions/random` รับเลขที่เลือกและสร้างห้องใหม่ หากมีห้องนั้นอยู่แล้วจะคืน HTTP 409
+`POST /api/sessions/join` ที่ส่งเฉพาะเลขห้องจะคืน HTTP 410 พร้อมข้อความ **ไม่มีห้องนี้** เมื่อไม่พบห้อง
 ส่ง `Authorization: Bearer TOKEN` สำหรับ `/api/info`, `/api/request`, การกลับเข้าห้องด้วยสิทธิ์เดิม และการปิดห้อง
 ส่ง `X-Session-Id` เพิ่มได้เพื่อยืนยันว่ากุญแจตรงกับห้องที่ต้องการ
 การกรอกเลขหรือรหัสผิดรวม 10 ครั้งต่อนาทีต่อ IP จะถูกปฏิเสธชั่วคราวด้วย HTTP 429
@@ -529,6 +530,7 @@ error/empty/duplicate/cooldown, scroll, nickname, role redirects, reconnect แ�
     ถ้าตัดอินเทอร์เน็ตของ Player ด้วย ให้ตรวจเพลงกลับมาเล่นเมื่อเข้าถึง YouTube ได้อีกครั้ง
 13. เข้า Guest/Admin ห้องใหม่ตรวจชื่อสุ่มใหม่; refresh/reconnect ห้องเดิมตรวจชื่อไม่เปลี่ยน
 14. หน้าแรกกรอกเลขห้องเพื่อเข้า Guest และรหัสสร้างเพื่อเปิด Player ตรวจรหัสผิดนับถอยหลัง 5 วินาที
+    ที่การ์ด **เข้าร่วมจัดคิวเพลง** ลองกรอกเลขที่ยังไม่มีห้อง ต้องเห็น **ไม่มีห้องนี้**
     ลอง Enter ซ้ำระหว่างรอ และตรวจ Guest/Admin ไม่มีปุ่มหมวด “ทั้งหมด” หรือแถวศิลปิน
     สลับทั้งสามโหมดโดยไม่ค้นหา: เพลงแนะนำยังเป็นชาร์ตประเทศ สุ่มและแสดงเพิ่มครั้งละ 5 เพลงได้
 15. Admin/Controller มีไอคอนผู้เข้าร่วมและสถานะออนไลน์ Guest ไม่ได้รับรายชื่อ

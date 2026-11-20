@@ -14,7 +14,7 @@ const Room = (() => {
   panel.className = `session-panel${isPlayer ? " player-entry" : ""}`;
   const joinForm = `
     <form id="room-join" ${isPlayer ? 'class="room-option" tabindex="-1" aria-labelledby="join-room-title"' : ""}>
-      <h2 id="join-room-title">${t(isPlayer ? "joinRoomAction" : "joinRoom")}</h2>
+      <h2 id="join-room-title"${isPlayer ? ' class="room-option-title"' : ""}>${isPlayer ? '<span class="room-option-icon" data-icon="↪" aria-hidden="true"></span>' : ""}${t(isPlayer ? "joinMusicQueue" : "joinRoom")}</h2>
       <label>${t("roomNumber")} <input id="room-code" type="text" inputmode="numeric" pattern="[1-9][0-9]{2}" maxlength="3" autocomplete="off" required></label>
       <button type="submit">${t("enterRoom")}</button>
     </form>`;
@@ -34,12 +34,12 @@ const Room = (() => {
           ${joinForm}
           ${[1, 2].map((number) => `
             <button class="room-option random-room" id="random-room-${number}" type="button" disabled>
-              <span>${t("createMusicRoom")}</span>
+              <span class="room-option-title"><span class="room-option-icon" data-icon="♫" aria-hidden="true"></span>${t("createMusicRoom")}</span>
               <strong id="random-code-${number}">—</strong>
             </button>`).join("")}
           <div id="manual-room" class="room-option" role="group" aria-labelledby="manual-room-title" tabindex="-1">
             <form id="room-create">
-              <h2 id="manual-room-title">${t("createRoomManually")}</h2>
+              <h2 id="manual-room-title" class="room-option-title"><span class="room-option-icon" data-icon="+" aria-hidden="true"></span>${t("createOrJoinPlayer")}</h2>
               <label>${t("roomNumber")} <input id="entry-code" type="text" inputmode="numeric" pattern="[1-9][0-9]{2}" maxlength="3" autocomplete="off" required></label>
               <button type="submit">${t("createOrJoin")}</button>
             </form>

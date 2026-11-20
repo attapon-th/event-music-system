@@ -96,7 +96,7 @@ function findRoom(req, res, next) {
     return fail(req, res, 400, "กรุณากรอกเลขห้อง 3 หลัก");
   }
   req.room = sessions.get(code, sessionId);
-  if (!req.room) return fail(req, res, 410, "ห้องหมดอายุหรือไม่พบห้อง");
+  if (!req.room) return fail(req, res, 410, sessionId === undefined ? "ไม่มีห้องนี้" : "ห้องหมดอายุหรือไม่พบห้อง");
   next();
 }
 function requireMember(req, res, next) {
