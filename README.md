@@ -74,7 +74,8 @@ Admin/Controller role. The first participant goes straight to Admin at `/a`;
 later participants enter Guest. The entry displays digits openly and uses a numeric keyboard
 on mobile. No creation password is required; any legacy `HOST_PASSWORD` is ignored.
 New rooms start at **60% volume**. If the browser blocks audio, use its existing
-play button. Guests can also scan the QR or join directly at `/guest`.
+play button. The QR is hidden when the Player opens. Press **แสดง QR** to let
+guests scan it, or guests can join directly at `/guest`.
 
 > Node ≥ 20 works too (`npm install && npm start`), but Bun is what the Docker
 > image and scripts use.
@@ -320,7 +321,7 @@ Controller ควบคุมเพลงและการตั้งค่า
 รายชื่อเก็บทุกคนที่เคยเข้าห้องจนห้องจบ พร้อมสถานะออนไลน์/ออฟไลน์
 ชื่อเล่นใช้แสดงผลเท่านั้น สิทธิ์ตรวจด้วยกุญแจที่ server ออกให้ โดยไม่ส่งกุญแจในรายชื่อ
 
-Player ซ่อน/แสดงการ์ด QR ได้ และแสดงใต้ QR เป็น `ห้อง {rn} · yt1.lkzlab.uk/guest`
+เมื่อเปิด Player การ์ด QR จะซ่อนอยู่ กด **แสดง QR** เพื่อเปิดการ์ด ข้อความใต้ QR คือ `ห้อง {rn} · yt1.lkzlab.uk/guest`
 ปุ่มประเภทงานบน Player ซ่อนไว้ หน้า `/a` ไม่มีปุ่มตัวกรองและซ่อนปุ่มล้างคิว
 เวลารอเพิ่มเพลงเริ่มต้นที่ **5 วินาที** ปุ่มเวลารอแสดงค่าในปุ่มโดยตรง ไม่มี label การตั้งค่าด้านล่าง
 ปุ่ม **ออก** หยุดเสียงและตัดการเชื่อมต่อเฉพาะ Player หน้านั้น แล้วกลับหน้าเริ่ม ห้องและเครื่องอื่นยังอยู่

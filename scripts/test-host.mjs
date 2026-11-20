@@ -176,10 +176,16 @@ for (const earlyReady of [false, true]) {
   play.click();
   assert.equal(state, 1, "Existing play button unlocks blocked audio");
   assert.equal(messages.length, beforeBlockedClick, "Unlocking audio must not pause the server queue");
-  document.getElementById("qr-toggle").click();
-  assert.equal(document.getElementById("qr-card").hidden, true);
-  document.getElementById("qr-toggle").click();
-  assert.equal(document.getElementById("qr-card").hidden, false);
+  const qrToggle = document.getElementById("qr-toggle");
+  const qrCard = document.getElementById("qr-card");
+  assert.equal(qrCard.hidden, true, "Player opens with the QR card hidden");
+  assert.equal(qrToggle.textContent, "แสดง QR");
+  qrToggle.click();
+  assert.equal(qrCard.hidden, false);
+  assert.equal(qrToggle.textContent, "ซ่อน QR");
+  qrToggle.click();
+  assert.equal(qrCard.hidden, true);
+  assert.equal(qrToggle.textContent, "แสดง QR");
   const skip = document.getElementById("skip");
   const volume = document.getElementById("volume");
   for (const [index, node] of [play, skip, volume].entries()) {

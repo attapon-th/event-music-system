@@ -48,7 +48,7 @@
         <button id="skip" title="ข้ามเพลง (N)" data-i18n-title="Skip (n)">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5v14l10-7z"></path><rect x="17" y="5" width="2.6" height="14" rx="1"></rect></svg>
         </button>
-        <button id="qr-toggle" class="pill" type="button" aria-pressed="false" data-i18n="hideQR">ซ่อน QR</button>
+        <button id="qr-toggle" class="pill" type="button" aria-pressed="true" data-i18n="showQR">แสดง QR</button>
         <button id="auto-queue-toggle" class="pill" type="button" aria-pressed="false">เล่นต่ออัตโนมัติ: ปิด</button>
         <button id="context-toggle" class="pill" hidden title="ระบุประเภทงานสำหรับตัวกรอง AI" data-i18n-title="Event context — tell the AI filter what kind of event this is">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6.5-4.3-6.5-10a6.5 6.5 0 0113 0c0 5.7-6.5 10-6.5 10z"></path><circle cx="12" cy="10.5" r="2.4"></circle></svg>
@@ -69,7 +69,7 @@
     </section>
 
     <aside class="sidebar">
-      <div id="qr-card" class="qr-card">
+      <div id="qr-card" class="qr-card" hidden>
         <div class="qr-title" data-i18n="Scan to request a song">สแกนเพื่อเพิ่มเพลง</div>
         <div class="qr-sub" data-i18n="Scan to add a song">Scan to add a song</div>
         <div class="qr-frame"><img id="qr" alt="คิวอาร์โค้ด" data-i18n-alt="QR code" /></div>

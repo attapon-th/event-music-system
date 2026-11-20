@@ -445,9 +445,9 @@ function openPlayer() {
   started = true;
   autoplayBlocked = false;
   document.getElementById("playpause").classList.remove("needs-play");
-  document.getElementById("qr-card").hidden = false;
-  document.getElementById("qr-toggle").textContent = t("hideQR");
-  document.getElementById("qr-toggle").setAttribute("aria-pressed", "false");
+  document.getElementById("qr-card").hidden = true;
+  document.getElementById("qr-toggle").textContent = t("showQR");
+  document.getElementById("qr-toggle").setAttribute("aria-pressed", "true");
   currentVideoId = null;
   currentItemId = null;
   appliedPaused = null;
