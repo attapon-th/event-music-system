@@ -89,6 +89,13 @@ when no requested songs remain. New requests replace the waiting automatic batch
 the current song finishes before the requested songs play.
 _Avoid_: YouTube account personalization, adding recommendations to the request Queue.
 
+**Keep Queue**:
+A room setting, disabled by default, that puts a requested song at the back of the
+Queue when it finishes, is skipped, or is replaced by Play Now. Failed and
+automatic songs are excluded. Each pass gets a new queue item ID so late Player
+reports cannot advance a later pass.
+_Avoid_: Playback history, Auto Queue, blocking manual removal.
+
 **Automatic batch**:
 Up to five automatic songs selected together in YouTube recommendation order,
 played before selecting another batch from the latest song.

@@ -205,10 +205,6 @@ try {
   await admin.call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, x: points.x, y: points.to });
   await admin.wait(`adminState.queue[2].id === ${JSON.stringify(oldOrder[0])}`);
   await admin.click('#queue li:first-child .queue-more'); await admin.click('#queue-menu [data-queue-action=remove]');
-  await admin.wait('document.querySelector(".cancel-removal")');
-  await admin.click('.cancel-removal');
-  assert.equal(await admin.eval('pendingRemovals.size'), 0);
-  await admin.click('#queue li:first-child .queue-more'); await admin.click('#queue-menu [data-queue-action=remove]');
   await admin.wait('adminState.queue.length === 3');
   await guest.wait('lastQueueState.queue.length === 3');
   const next = await admin.eval('adminState.queue[0].id');
@@ -257,11 +253,10 @@ try {
   await guest.wait(`document.querySelector('#results .add-btn[data-video-id="${newIds[0]}"]').textContent === '✓'`);
   await guest.click(`#results .add-btn[data-video-id="${newIds[1]}"]`, true);
   await guest.wait('[...document.querySelectorAll(".toast.bad")].some(el => el.textContent.includes("กรุณารอ"))');
-  // Closing the real WebSocket exercises offline cancellation and authenticated retry.
+  // Closing the real WebSocket exercises offline controls and authenticated retry.
   await admin.click('#queue li:first-child .queue-more'); await admin.click('#queue-menu [data-queue-action=remove]');
   await admin.eval('window.testSockets.at(-1).close()');
   await admin.wait('document.querySelector("#connection").dataset.status === "offline"');
-  assert.equal(await admin.eval('pendingRemovals.size'), 0);
   assert.equal(await admin.eval('document.querySelector("#admin-pause").disabled'), true);
   await admin.wait('document.querySelector("#connection").dataset.status === "connected" && adminAuthenticated');
   // Grant/revoke uses real participant controls and the existing role redirects.
@@ -321,109 +316,129 @@ try {
   await admin.wait('adminState.nowPlaying.videoId === "manual00001" && adminState.autoQueueItems.length === 5');
   await guest.wait('lastQueueState.autoQueueItems.length === 5');
 
-  // Closing a real Player tab drops sessionStorage; the main-screen card can resume the remembered room.
+  // Join or create from the welcome buttons, using a remote or touch.
   const playerPage = await page('/', false);
   await playerPage.viewport(1440);
   await playerPage.call('Page.bringToFront');
   assert.equal(await playerPage.eval('document.activeElement.id'), 'start-btn');
+  await playerPage.eval('document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Unidentified", keyCode: 20, bubbles: true, cancelable: true }))');
+  assert.ok(['open-player-entry', 'open-queue-entry'].includes(await playerPage.eval('document.activeElement.id')));
+  await playerPage.eval('document.querySelector("#open-player-entry").focus()');
   await playerPage.key('Enter');
-  await playerPage.wait('!document.querySelector("#random-room-2").disabled');
-  assert.equal(await playerPage.eval('document.activeElement.id'), 'room-join');
-  assert.equal(await playerPage.eval('document.querySelector("#join-room-title").textContent'), 'เข้าร่วมจัดคิวเพลง');
-  assert.equal(await playerPage.eval('document.querySelector("#manual-room-title").textContent'), 'สร้างหรือเข้าร่วมเครื่องเล่น');
-  assert.equal(await playerPage.eval('document.querySelector("#room-create button").textContent'), 'สร้างหรือเข้าร่วม');
-  await playerPage.key('ArrowDown');
-  assert.equal(await playerPage.eval('document.activeElement.id'), 'random-room-2');
-  await playerPage.key('ArrowUp');
-  assert.equal(await playerPage.eval('document.activeElement.id'), 'room-join');
-  await playerPage.key('ArrowRight');
-  assert.equal(await playerPage.eval('document.activeElement.id'), 'random-room-1');
-  await playerPage.key('ArrowDown');
-  assert.equal(await playerPage.eval('document.activeElement.id'), 'manual-room');
-  await playerPage.key('Enter');
-  assert.equal(await playerPage.eval('document.activeElement.id'), 'entry-code');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'room-code');
   await playerPage.key('Escape');
-  assert.equal(await playerPage.eval('document.activeElement.id'), 'manual-room');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'open-player-entry');
   await playerPage.key('Enter');
   await playerPage.call('Input.insertText', {text:'456'});
   await playerPage.key('ArrowDown');
-  assert.equal(await playerPage.eval('document.activeElement === document.querySelector("#room-create button")'), true);
+  assert.equal(await playerPage.eval('document.activeElement === document.querySelector("#room-join button")'), true);
   await playerPage.key('Enter');
   await playerPage.wait('document.body.dataset.roomActive === "true" && Room.connected');
-  assert.equal(await playerPage.eval('Room.code'), '456');
   const playerSession = await playerPage.eval('Room.sessionId');
-  const playerContext = playerPage.browserContextId;
-  await browser.call('Target.closeTarget', {targetId:playerPage.targetId});
-  playerPage.closed = true;
-  const returned = await page('/', false, playerContext);
-  await returned.viewport(1440);
-  assert.equal(await returned.eval('Room.token'), undefined);
-  assert.equal(await returned.eval('document.querySelector("#room-options").hidden'), true);
-  await returned.click('#start-btn', true);
-  await returned.wait('!document.querySelector("#room-options").hidden');
-  assert.equal(await returned.eval('Room.token'), undefined);
-  await returned.click('#resume-player', true);
-  await returned.wait('document.body.dataset.roomActive === "true" && Room.connected');
+  assert.equal(await playerPage.eval('Room.code'), '456');
+  await playerPage.wait('!document.querySelector("#qr-card").hidden');
+  assert.equal(await playerPage.eval('document.querySelector("#qr-card #player-room-label").textContent'), 'ห้อง 456');
+
+  const returned = await page('/', false);
+  await returned.click('#open-player-entry', true);
+  await returned.call('Input.insertText', {text:'456'});
+  await returned.click('#room-join button', true);
+  await returned.wait('Room.connected');
   assert.equal(await returned.eval('Room.sessionId'), playerSession);
-  assert.equal(await returned.eval('document.querySelector(".player-entry").hidden'), true);
   await returned.eval('window.playerReloadMarker = true');
   await returned.call('Page.reload');
   await returned.wait('!window.playerReloadMarker && document.body?.dataset.roomActive === "true" && Room.connected');
   assert.equal(await returned.eval('Room.sessionId'), playerSession);
-  // Two active tabs survive one tab leaving; explicit Leave clears the resume option.
-  const secondPlayer = await page('/', false, playerContext);
-  await secondPlayer.viewport(1440);
-  await secondPlayer.click('#start-btn'); await secondPlayer.click('#resume-player'); await secondPlayer.wait('Room.connected');
-  await returned.click('#exit-room');
-  await returned.wait('document.body.dataset.roomActive === "false"');
-  assert.equal(await secondPlayer.eval('Room.connected'), true);
-  assert.equal(await secondPlayer.eval('localStorage.getItem("music-last-player")'), null);
-  await returned.click('#start-btn');
-  assert.equal(await returned.eval('document.querySelector("#room-options").hidden'), false);
-  assert.equal(await returned.eval('document.querySelector("#resume-player").hidden'), true);
-  // A deleted/replaced room must show entry, even if its room number is reused.
-  const previousToken = await secondPlayer.eval('Room.token');
-  await secondPlayer.eval('Room.fetch("/api/sessions/close", {method:"POST"})');
-  await secondPlayer.wait('document.body.dataset.roomActive === "false"');
-  const replacement = await (await fetch(base + '/api/sessions', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:'45615'})})).json();
-  assert.notEqual(replacement.sessionId, playerSession);
-  const invalidated = await page('/', false, playerContext);
-  await invalidated.eval(`localStorage.setItem("music-last-player", JSON.stringify({code:"456",sessionId:${JSON.stringify(playerSession)},token:${JSON.stringify(previousToken)}}))`);
-  await invalidated.click('#start-btn');
-  await invalidated.wait('!document.querySelector("#random-room-1").disabled');
-  await invalidated.click('#resume-player');
-  await invalidated.wait('document.querySelector("#resume-player").hidden');
-  assert.equal(await invalidated.eval('document.body.dataset.roomActive'), 'false');
-  assert.equal(await invalidated.eval('localStorage.getItem("music-last-player")'), null);
-  await invalidated.eval('document.querySelector("#room-code").value = document.querySelector("#random-code-1").textContent');
-  await invalidated.click('#room-join button');
-  await invalidated.wait('document.querySelector("#room-error").textContent === "ไม่มีห้องนี้"');
-  assert.equal(await invalidated.eval('location.pathname'), '/');
+  await playerPage.click('#exit-room');
+  await playerPage.wait('document.querySelector("#exit-dialog").open');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'cancel-exit');
+  assert.equal(await playerPage.eval('Room.connected'), true);
+  await playerPage.click('#cancel-exit');
+  assert.equal(await playerPage.eval('document.querySelector("#exit-dialog").open'), false);
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'exit-room');
+  await playerPage.key('Enter');
+  await playerPage.key('Escape');
+  assert.equal(await playerPage.eval('Room.connected'), true);
+  await playerPage.key('Enter');
+  await playerPage.key('ArrowRight');
+  assert.equal(await playerPage.eval('document.activeElement.id'), 'confirm-exit');
+  await playerPage.key('Enter');
+  await playerPage.wait('document.body.dataset.roomActive === "false"');
+  assert.equal(await returned.eval('Room.connected'), true);
+
+  const available = await (await fetch(base + '/api/sessions/available')).json();
+  const controlPage = await page('/', false);
+  await controlPage.click('#open-queue-entry');
+  await controlPage.call('Input.insertText', { text: available.codes[0] });
+  await controlPage.key('Enter');
+  await controlPage.wait('document.querySelector("#room-error").textContent === "ไม่มีห้องนี้"');
+  assert.match(await controlPage.eval('document.querySelector("#room-retry").textContent'), /10 วินาที/);
+  assert.equal(await controlPage.eval('document.querySelector("#room-join button").disabled'), true);
+  await controlPage.click('#open-player-entry');
+  assert.equal(await controlPage.eval('document.querySelector("#room-join button").disabled'), false);
+
   const randomPlayer = await page('/', false);
   await randomPlayer.click('#start-btn', true);
-  await randomPlayer.wait('!document.querySelector("#random-room-2").disabled');
-  assert.equal(await randomPlayer.eval('document.querySelector(".room-options-grid").children.length'), 4);
-  assert.equal(await randomPlayer.eval('getComputedStyle(document.querySelector(".room-options-grid")).gridTemplateColumns.split(" ").length'), 1);
-  const randomCode = await randomPlayer.eval('document.querySelector("#random-code-2").textContent');
+  await randomPlayer.wait('Room.connected && !document.querySelector("#qr-card").hidden');
+  const randomCode = await randomPlayer.eval('Room.code');
   assert.match(randomCode, /^[1-9][0-9]{2}$/);
-  assert.notEqual(randomCode, await randomPlayer.eval('document.querySelector("#random-code-1").textContent'));
-  await randomPlayer.viewport(1440);
-  assert.equal(await randomPlayer.eval('getComputedStyle(document.querySelector(".room-options-grid")).gridTemplateColumns.split(" ").length'), 2);
-  // Older Android remotes can report raw D-pad key codes with no DOM key name.
-  await randomPlayer.eval('document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Unidentified", keyCode: 20, bubbles: true, cancelable: true }))');
-  assert.equal(await randomPlayer.eval('document.activeElement.id'), 'random-room-2');
-  await randomPlayer.eval('document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Unidentified", keyCode: 23, bubbles: true, cancelable: true }))');
-  await randomPlayer.wait('Room.connected');
-  assert.equal(await randomPlayer.eval('Room.code'), randomCode);
-  const controlPage = await page('/', false);
-  await controlPage.call('Page.bringToFront');
-  await controlPage.key('Enter');
-  await controlPage.key('Enter');
-  assert.equal(await controlPage.eval('document.activeElement.id'), 'room-code');
-  await controlPage.call('Input.insertText', { text: randomCode });
-  await controlPage.key('Enter');
+  assert.notEqual(randomCode, '456');
+  await controlPage.wait('!document.querySelector("#room-join button").disabled');
+  await controlPage.click('#open-queue-entry');
+  await controlPage.wait('!document.querySelector("#room-join button").disabled');
+  await controlPage.eval(`document.querySelector('#room-code').value = ${JSON.stringify(randomCode)}`);
+  await controlPage.click('#room-join button');
   await controlPage.wait('location.pathname === "/a" && typeof Room !== "undefined" && Room.connected');
   assert.equal(await controlPage.eval('Room.code'), randomCode);
+
+  for (const width of [320, 375, 768, 1440]) {
+    await randomPlayer.viewport(width);
+    const geometry = await randomPlayer.eval(`(()=> {
+      const box = selector => document.querySelector(selector).getBoundingClientRect().toJSON();
+      return { video: box('#player-wrap'), title: box('#now-title'), skip: box('#skip'), volume: box('#volume'),
+        controls: box('#controls'), exit: box('#exit-room'), queue: box('#player-queue-card'), meta: box('#now-meta'),
+        width: innerWidth, height: innerHeight, scroll: document.documentElement.scrollWidth,
+        titleSize: parseFloat(getComputedStyle(document.querySelector('#now-title')).fontSize) };
+    })()`);
+    assert.equal(geometry.scroll, geometry.width);
+    assert.ok(geometry.titleSize < 44);
+    assert.ok(geometry.skip.right <= geometry.title.left && geometry.volume.right <= geometry.exit.left);
+    assert.equal(geometry.meta.y, geometry.controls.y);
+    assert.ok(geometry.video.height > geometry.height / 2);
+    assert.ok(geometry.queue.bottom <= geometry.controls.y);
+    assert.equal(await randomPlayer.eval('document.querySelector("#qr-toggle, #auto-queue-toggle")'), null);
+    await randomPlayer.screenshot(`player-${width}`);
+  }
+  await controlPage.click('#admin-settings');
+  const togglePlayerPanel = async (id) => {
+    await controlPage.eval(`document.getElementById(${JSON.stringify(id)}).focus()`);
+    await controlPage.key('Enter');
+  };
+  await togglePlayerPanel('setting-showPlayerQr');
+  await randomPlayer.wait('document.querySelector("#qr-card").hidden && !document.querySelector("#player-queue-card").hidden');
+  assert.equal(await randomPlayer.eval('document.querySelector("#player-room-label").getClientRects().length'), 0);
+  await togglePlayerPanel('setting-showPlayerQueue');
+  await randomPlayer.wait('document.querySelector("#player-sidebar").hidden');
+  assert.ok(await randomPlayer.eval('document.querySelector("#player-wrap").offsetWidth >= innerWidth - 40'));
+  assert.equal(await returned.eval('document.querySelector("#player-sidebar").hidden'), false, 'Display settings are isolated by room');
+  await togglePlayerPanel('setting-showPlayerQr');
+  await randomPlayer.wait('!document.querySelector("#qr-card").hidden && document.querySelector("#player-queue-card").hidden');
+  await togglePlayerPanel('setting-showPlayerQueue');
+  await randomPlayer.wait('!document.querySelector("#player-queue-card").hidden');
+  assert.equal(await controlPage.eval('document.querySelector("#setting-allowQueueJoin").getAttribute("aria-pressed")'), 'true');
+  await togglePlayerPanel('setting-allowQueueJoin');
+  await controlPage.wait('!adminState.allowQueueJoin');
+  await playerPage.click('#open-queue-entry');
+  await playerPage.call('Input.insertText', { text: randomCode });
+  await playerPage.key('Enter');
+  await playerPage.wait('document.querySelector("#room-error").textContent === "ห้องนี้ปิดรับผู้เข้าร่วมจัดคิวใหม่"');
+  assert.equal(await playerPage.eval('document.querySelector("#room-retry").textContent'), '');
+  assert.equal(await playerPage.eval('Room.token'), undefined);
+  await controlPage.call('Page.bringToFront');
+  await togglePlayerPanel('setting-allowQueueJoin');
+  await controlPage.wait('adminState.allowQueueJoin');
+  await playerPage.click('#room-join button');
+  await playerPage.wait('location.pathname === "/guest" && typeof Room !== "undefined" && Room.connected');
   for (const client of clients.slice(1)) assert.deepEqual(client.errors, [], 'No JavaScript runtime errors');
   // Export clean final views after the role redirects have rebuilt Guest feedback.
   await admin.click('#queue-tab'); await guest.click('#search-tab');
@@ -434,7 +449,7 @@ try {
       await client.screenshot(`${name}-${width}`);
     }
   }
-  console.log('PASS: real Chromium at 320/375/768/1440px; no overflow; 44px controls; touch tabs/add/menu; keyboard menus/settings; real API/WS playback, volume, move, pointer drag, delayed remove/cancel, Play Now, skip, search/modes/paging/clear/shuffle, duplicate/cooldown/error/empty feedback, scroll preservation, nickname refresh, role redirects, authenticated reconnect, ordered automatic batches/user priority, Player tab resume/local leave/stale credentials and reduced motion. YouTube upstream simulated.');
+  console.log('PASS: real Chromium at 320/375/768/1440px; no overflow; 44px controls; touch tabs/add/menu; keyboard menus/settings; real API/WS playback, volume, move, pointer drag, immediate removal, Play Now, skip, search/modes/paging/clear/shuffle, duplicate/cooldown/error/empty feedback, scroll preservation, nickname refresh, role redirects, authenticated reconnect, ordered automatic batches/user priority, Player entry/refresh/local leave, room display toggles, and responsive playback controls and reduced motion. YouTube upstream simulated.');
   console.log(`Screenshots: ${artifacts}`);
 } catch (error) {
   console.error(error);

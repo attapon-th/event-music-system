@@ -32,6 +32,7 @@ for (const earlyReady of [false, true]) {
         children: [], handlers: {},
         set innerHTML(value) { this.children = []; this.markup = value; },
         get innerHTML() { return this.markup; },
+        contains() { return false; },
         appendChild(child) { this.children.push(child); },
         querySelectorAll() { return this.children.map((child) => child.querySelector(".q-remove")); },
         value: "100", style: { setProperty() {} },
@@ -58,8 +59,21 @@ for (const earlyReady of [false, true]) {
     querySelectorAll: (selector) => selector === "button, input" ? [...nodes.values()] : [],
     addEventListener(type, handler) { listeners[type] = handler; },
   };
+  const exitDialog = document.getElementById("exit-dialog");
+  const exitButton = document.getElementById("exit-room");
+  const cancelExit = document.getElementById("cancel-exit");
+  const confirmExit = document.getElementById("confirm-exit");
+  cancelExit.rect = { left: 0, top: 0, width: 44, height: 44 };
+  confirmExit.rect = { left: 70, top: 0, width: 44, height: 44 };
+  exitDialog.querySelectorAll = () => [cancelExit, confirmExit];
+  exitDialog.showModal = () => {
+    exitDialog.open = cancelExit.visible = confirmExit.visible = true;
+    cancelExit.focus();
+  };
+  exitDialog.close = () => { exitDialog.open = cancelExit.visible = confirmExit.visible = false; };
+  let nativeConfirmation = false;
   const context = createContext({
-    document, location: { protocol: "http:", host: "localhost" },
+    document, URL, confirm: () => nativeConfirmation, location: { protocol: "http:", host: "localhost" },
     addEventListener(type, handler) { listeners[type] = handler; },
     history: {
       get state() { return historyStates[historyIndex]; },
@@ -152,19 +166,9 @@ for (const earlyReady of [false, true]) {
   assert.equal(state, 1);
   assert.ok(calls.some(([action, volume]) => action === "volume" && volume === 37));
   assert.equal(document.getElementById("player").getAttribute("tabindex"), "-1");
-  const autoQueueToggle = document.getElementById("auto-queue-toggle");
-  assert.equal(autoQueueToggle.getAttribute("aria-pressed"), "true");
-  autoQueueToggle.click();
-  assert.equal(messages.at(-1).type, "setAutoQueue");
-  assert.equal(messages.at(-1).enabled, false);
-  runInContext('latestState.autoQueue = true; latestState.autoQueueStatus = "loading"; latestState.nowPlaying.autoQueued = true; render();', context);
-  assert.equal(autoQueueToggle.getAttribute("aria-pressed"), "true");
-  assert.equal(autoQueueToggle.classList.contains("on"), true);
+  runInContext('latestState.nowPlaying.autoQueued = true; render();', context);
   assert.match(document.getElementById("now-channel").textContent, /เพลงอัตโนมัติ/);
-  assert.equal(document.getElementById("auto-queue-status").textContent, "กำลังหาเพลงแนะนำ…");
-  autoQueueToggle.click();
-  assert.equal(messages.at(-1).enabled, false);
-  runInContext('latestState.autoQueue = false; latestState.autoQueueStatus = "idle"; render();', context);
+  assert.equal(html.includes('id="auto-queue-toggle"'), false);
   const play = document.getElementById("playpause");
   state = -1;
   playerEvents.onAutoplayBlocked();
@@ -176,16 +180,18 @@ for (const earlyReady of [false, true]) {
   play.click();
   assert.equal(state, 1, "Existing play button unlocks blocked audio");
   assert.equal(messages.length, beforeBlockedClick, "Unlocking audio must not pause the server queue");
-  const qrToggle = document.getElementById("qr-toggle");
+  await settleFullscreen();
   const qrCard = document.getElementById("qr-card");
-  assert.equal(qrCard.hidden, true, "Player opens with the QR card hidden");
-  assert.equal(qrToggle.textContent, "แสดง QR");
-  qrToggle.click();
-  assert.equal(qrCard.hidden, false);
-  assert.equal(qrToggle.textContent, "ซ่อน QR");
-  qrToggle.click();
+  const queueCard = document.getElementById("player-queue-card");
+  assert.equal(qrCard.hidden, false, "Player opens with the room QR visible");
+  assert.equal(html.includes('id="qr-toggle"'), false);
+  runInContext('latestState.showPlayerQr = false; render();', context);
   assert.equal(qrCard.hidden, true);
-  assert.equal(qrToggle.textContent, "แสดง QR");
+  assert.equal(queueCard.hidden, false);
+  runInContext('latestState.showPlayerQueue = false; render();', context);
+  assert.equal(document.getElementById("player-sidebar").hidden, true);
+  assert.equal(document.getElementById("stage").classList.contains("no-sidebar"), true);
+  runInContext('latestState.showPlayerQr = true; latestState.showPlayerQueue = true; render();', context);
   const skip = document.getElementById("skip");
   const volume = document.getElementById("volume");
   for (const [index, node] of [play, skip, volume].entries()) {
@@ -202,14 +208,6 @@ for (const earlyReady of [false, true]) {
   press("ArrowRight");
   assert.equal(document.activeElement, volume);
   assert.equal(press("ArrowLeft").defaultPrevented, undefined, "Slider retains native volume keys");
-  document.getElementById("context-input").focus();
-  const typingBefore = messages.length;
-  press("n"); press("f"); press(" ");
-  assert.equal(messages.length, typingBefore, "Text entry must not trigger shortcuts");
-  press("Enter");
-  assert.equal(messages.at(-1).type, "setEventContext");
-  assert.equal(document.getElementById("context-row").classList.contains("hidden"), true, "Saving with Enter must not reopen editor through bubbling");
-  assert.equal(document.activeElement.id, "context-toggle");
   play.focus();
   const keyboardBefore = messages.length;
   press("b", { keyCode: 66 });
@@ -278,8 +276,8 @@ for (const earlyReady of [false, true]) {
   assert.equal(document.activeElement.dataset.queueId, "queued-1", "Queue broadcasts preserve remote selection");
   runInContext("latestState.queue = []; render();", context);
   assert.equal(document.activeElement, skip, "Removing focused track returns focus to a visible control");
-  const snapshot = (nowPlaying, queue = []) => runInContext(`ws.onmessage({ data: JSON.stringify({ type: "state", state: {
-    nowPlaying: ${JSON.stringify(nowPlaying)}, queue: ${JSON.stringify(queue)}, paused: false, volume: 37
+  const snapshot = (nowPlaying, queue = [], keepQueue = false) => runInContext(`ws.onmessage({ data: JSON.stringify({ type: "state", state: {
+    nowPlaying: ${JSON.stringify(nowPlaying)}, queue: ${JSON.stringify(queue)}, paused: false, volume: 37, keepQueue: ${keepQueue}
   } }) });`, context);
   const track = n => ({ id: `offline-${n}`, videoId: `offline000${n}`, title: `Offline ${n}`, channel: "Artist" });
   const repeatedVideo = { id: "repeat-1", videoId: "repeat00001", title: "Repeated video" };
@@ -343,9 +341,50 @@ for (const earlyReady of [false, true]) {
   runInContext("ws.onauth();", context);
   snapshot(track(8));
   assert.equal(calls.filter(([action]) => action === "load").length, loadsDuringAuth);
+  snapshot(track(8), [], true);
+  runInContext("ws.onclose();", context);
+  for (let i = 0; i < 53; i++) finishSong();
+  assert.equal(runInContext("currentItemId", context), "offline-8:53");
+  const firstBatch = runInContext("ws.authData().completed", context);
+  assert.equal(firstBatch.length, 51);
+  assert.equal(firstBatch.at(-1).id, "offline-8:50");
+  runInContext("ws.onauth();", context);
+  assert.equal(messages.at(-1).completed[0].id, "offline-8:51");
+  assert.equal(messages.at(-1).completed.length, 2);
+  runInContext("ws.onauth();", context);
+  snapshot({ ...track(8), id: "offline-8:53" }, [], true);
+  assert.equal(runInContext("completedOffline.length", context), 0);
+  assert.equal(runInContext('ws.unavailable("ห้องวนคิวหาย")', context), true);
+  finishSong();
+  assert.equal(context.roomFinished, "ห้องวนคิวหาย", "A lost room drains a loop without recycling it");
+  context.Room.token = "test-token";
+  runInContext("ws.onauth();", context);
+  snapshot(track(8));
   const beforeLeave = messages.length;
-  document.getElementById("exit-room").click();
-  assert.equal(state, -1, "Player exit stops local audio");
+  exitButton.click();
+  assert.equal(exitDialog.open, true);
+  assert.equal(document.activeElement, cancelExit);
+  press("MediaTrackNext");
+  assert.equal(messages.length, beforeLeave, "Playback shortcuts are scoped out of exit confirmation");
+  assert.equal(state, 1, "Opening confirmation keeps playback running");
+  press("Unidentified", { keyCode: 4 });
+  assert.equal(exitDialog.open, false);
+  assert.equal(document.activeElement, exitButton);
+  assert.equal(context.Room.connected, true);
+  if (earlyReady) {
+    exitDialog.showModal = undefined;
+    exitButton.click();
+    assert.equal(context.Room.connected, true, "Older browsers also allow cancellation");
+    nativeConfirmation = true;
+    exitButton.click();
+  } else {
+    exitButton.click();
+    press("ArrowRight");
+    assert.equal(document.activeElement, confirmExit);
+    press("OK");
+    assert.equal(exitDialog.open, false);
+  }
+  assert.equal(state, -1, "Confirmed Player exit stops local audio");
   assert.equal(context.Room.connected, false);
   assert.equal(messages.length, beforeLeave, "Player exit does not send room controls");
   context.Room.token = "test-token";

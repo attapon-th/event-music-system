@@ -3,7 +3,11 @@ let adminState = { nowPlaying: null, queue: [], paused: false, volume: 60 };
 let adminAuthenticated = false;
 let adminRoom = { participants: [], filterOn: false, moderationMode: "default", cooldownSeconds: 5 };
 let draggingId = null;
-const pendingRemovals = new Map();
+const roomSettings = new Map(["allowQueueJoin", "keepQueue", "showPlayerQr", "showPlayerQueue"].map(setting =>
+  [setting, document.getElementById(`setting-${setting}`)]));
+for (const [setting, button] of roomSettings) {
+  button.onclick = () => adminSend({ type: "setRoomSetting", setting, enabled: button.getAttribute("aria-pressed") !== "true" });
+}
 const adminFeedback = document.getElementById("admin-feedback");
 const adminControls = ["admin-play", "admin-pause", "admin-skip", "admin-volume", "admin-volume-toggle",
   "admin-settings", "admin-auto-queue", "admin-cooldown", "admin-clear"].map(id => document.getElementById(id));
@@ -20,36 +24,7 @@ function adminSend(message) {
   } else showAdminFeedback(t("offline"));
 }
 
-function cancelRemoval(id) {
-  clearTimeout(pendingRemovals.get(id)?.timer);
-  pendingRemovals.delete(id);
-}
-
-function cancelPendingRemovals() {
-  for (const id of pendingRemovals.keys()) cancelRemoval(id);
-}
-
 window.addEventListener("pageshow", (event) => { if (event.persisted) renderAdmin(); });
-
-function startRemoval(id) {
-  if (!adminAuthenticated || pendingRemovals.has(id) || !adminState.queue.some(item => item.id === id)) return;
-  const pending = { deadline: Date.now() + 5000 };
-  pendingRemovals.set(id, pending);
-  function tick() {
-    if (pendingRemovals.get(id) !== pending) return;
-    const seconds = Math.max(0, Math.ceil((pending.deadline - Date.now()) / 1000));
-    if (!seconds) {
-      cancelRemoval(id);
-      if (adminAuthenticated && adminState.queue.some(item => item.id === id)) adminSend({ type: "remove", id });
-      renderAdmin();
-      return;
-    }
-    if (pending.label) pending.label.textContent = t("removeCountdown", { seconds });
-    pending.timer = setTimeout(tick, Math.min(1000, pending.deadline - Date.now()));
-  }
-  renderAdmin();
-  tick();
-}
 
 function connectAdmin() {
   setConnectionStatus("connecting");
@@ -68,7 +43,7 @@ function connectAdmin() {
       renderAdmin();
     },
     onError(msg) { showAdminFeedback(msg.error); },
-    onEnd() { adminAuthenticated = false; draggingId = null; cancelPendingRemovals(); setConnectionStatus("offline"); renderAdmin(); },
+    onEnd() { adminAuthenticated = false; draggingId = null; setConnectionStatus("offline"); renderAdmin(); },
     onOffline() {
       adminAuthenticated = false;
       draggingId = null;
@@ -79,8 +54,12 @@ function connectAdmin() {
 }
 
 function renderAdmin() {
-  for (const id of pendingRemovals.keys()) {
-    if (!adminAuthenticated || !adminState.queue.some(item => item.id === id)) cancelRemoval(id);
+  for (const [setting, button] of roomSettings) {
+    const enabled = adminState[setting] ?? setting !== "keepQueue";
+    button.hidden = adminRoom.role !== "admin";
+    button.disabled = !adminAuthenticated || button.hidden;
+    button.setAttribute("aria-pressed", String(enabled));
+    button.textContent = `${t(setting)} · ${t(enabled ? "On" : "Off")}`;
   }
   document.getElementById("admin-title").textContent = t("adminRoomTitle", { code: adminRoom.code || Room.code });
   document.title = document.getElementById("admin-title").textContent;
@@ -158,25 +137,6 @@ function renderAdmin() {
     more.onclick = () => openQueueMenu(item.id);
     actions.append(more);
     li.append(handle, img, meta, actions);
-    if (pendingRemovals.has(item.id)) {
-      const pending = pendingRemovals.get(item.id);
-      const notice = document.createElement("div");
-      notice.className = "removal-notice";
-      const label = document.createElement("span");
-      label.className = "remove-countdown";
-      label.setAttribute("role", "status");
-      label.setAttribute("aria-live", "polite");
-      label.textContent = t("removeCountdown", { seconds: Math.max(1, Math.ceil((pending.deadline - Date.now()) / 1000)) });
-      pending.label = label;
-      const cancel = document.createElement("button");
-      cancel.dataset.queueId = item.id;
-      cancel.dataset.queueAction = "remove";
-      cancel.className = "cancel-removal";
-      cancel.textContent = t("cancelRemoval");
-      cancel.onclick = () => { cancelRemoval(item.id); renderAdmin(); queueButton(item.id)?.focus(); };
-      notice.append(label, cancel);
-      li.append(notice);
-    }
     queueEl.append(li);
     handle.onkeydown = (event) => {
       if (!["ArrowUp", "ArrowDown"].includes(event.key) || !adminAuthenticated) return;
@@ -211,8 +171,10 @@ function renderAdmin() {
     handle.onpointercancel = () => { draggingId = null; renderAdmin(); };
   }
   if (focusedAction?.queueId) {
-    [...queueEl.querySelectorAll("button")].find(button => button.dataset.queueId === focusedAction.queueId &&
-      button.dataset.queueAction === focusedAction.queueAction)?.focus();
+    const buttons = [...queueEl.querySelectorAll("button")];
+    const sameAction = buttons.find(button => button.dataset.queueId === focusedAction.queueId &&
+      button.dataset.queueAction === focusedAction.queueAction);
+    (sameAction || buttons.find(button => button.className === "queue-more") || document.getElementById("admin-settings")).focus();
   }
   updateQueueMenu();
 }
@@ -328,12 +290,8 @@ const menuButtons = ["playNow", "moveUp", "moveDown", "remove"].map(key => {
     const id = queueMenuId;
     closeQueueMenu();
     if (!adminAuthenticated || !adminState.queue.some(item => item.id === id)) return;
-    if (key === "remove") {
-      startRemoval(id);
-      [...document.getElementById("queue").querySelectorAll("button")]
-        .find(el => el.dataset.queueId === id && el.className === "cancel-removal")?.focus();
-    } else adminSend(key === "playNow" ? { type: "playNow", id }
-      : { type: "move", id, dir: key === "moveUp" ? "up" : "down" });
+    if (key === "remove" || key === "playNow") adminSend({ type: key, id });
+    else adminSend({ type: "move", id, dir: key === "moveUp" ? "up" : "down" });
   };
   queueMenu.append(button);
   return button;
@@ -344,7 +302,6 @@ function updateQueueMenu() {
   if (!adminAuthenticated || index < 0) return closeQueueMenu(false);
   menuButtons[1].disabled = index === 0;
   menuButtons[2].disabled = index === adminState.queue.length - 1;
-  menuButtons[3].disabled = pendingRemovals.has(queueMenuId);
   if (menuButtons.includes(document.activeElement) && document.activeElement.disabled) menuButtons[0].focus();
   positionQueueMenu();
 }
@@ -402,6 +359,6 @@ document.addEventListener("keydown", event => {
 window.addEventListener("scroll", event => { if (!queueMenu.hidden && !queueMenu.contains(event.target)) closeQueueMenu(false); }, true);
 window.addEventListener("resize", () => { if (!queueMenu.hidden) positionQueueMenu(); });
 window.visualViewport?.addEventListener("resize", () => { if (!queueMenu.hidden) positionQueueMenu(); });
-window.addEventListener("pagehide", () => { cancelPendingRemovals(); closeQueueMenu(false); closeVolume(); if (settingsDrawer.open) settingsDrawer.close(); });
+window.addEventListener("pagehide", () => { closeQueueMenu(false); closeVolume(); if (settingsDrawer.open) settingsDrawer.close(); });
 
 Room.ready.then((joined) => { if (joined) connectAdmin(); });

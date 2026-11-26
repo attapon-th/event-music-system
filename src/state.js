@@ -19,6 +19,10 @@ export class JukeboxState {
     this.autoQueueItems = []; // ordered batch, outside the upcoming request queue
     this.autoQueueRequest = null;
     this.autoQueueFailures = 0;
+    this.keepQueue = false;
+    this.showPlayerQr = true;
+    this.showPlayerQueue = true;
+    this.allowQueueJoin = true;
     this.onChange = () => {};
   }
 
@@ -37,6 +41,10 @@ export class JukeboxState {
       autoQueue: this.autoQueue,
       autoQueueStatus: this.autoQueueStatus,
       autoQueueItems: this.autoQueueItems,
+      keepQueue: this.keepQueue,
+      showPlayerQr: this.showPlayerQr,
+      showPlayerQueue: this.showPlayerQueue,
+      allowQueueJoin: this.allowQueueJoin,
     };
   }
 
@@ -82,6 +90,11 @@ export class JukeboxState {
       this.autoQueueFailures = failed && this.nowPlaying.autoQueued ? this.autoQueueFailures + 1 : 0;
       this.history.push(this.nowPlaying);
       if (this.history.length > 100) this.history.shift();
+      if (this.keepQueue && !failed && !this.nowPlaying.autoQueued) {
+        // Use the same occurrence ID as the Player when it advances offline.
+        const [id, cycle = "0"] = this.nowPlaying.id.split(":");
+        this.queue.push({ ...this.nowPlaying, id: `${id}:${Number(cycle) + 1}` });
+      }
     }
     this.nowPlaying = this.queue.shift() || null;
     this.paused = false;
@@ -175,6 +188,13 @@ export class JukeboxState {
     if (typeof enabled !== "boolean" || enabled === this.autoQueue) return;
     this.autoQueue = enabled;
     this._resetAutoQueue();
+    this._emit();
+  }
+
+  setRoomSetting(setting, enabled) {
+    if (!["keepQueue", "showPlayerQr", "showPlayerQueue", "allowQueueJoin"].includes(setting) ||
+        typeof enabled !== "boolean" || this[setting] === enabled) return;
+    this[setting] = enabled;
     this._emit();
   }
 

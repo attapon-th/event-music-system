@@ -31,28 +31,12 @@ function element(id = "", tagName = "div") {
 const node = id => { if (!nodes.has(id)) { const el = element(id); el.hidden = ["queue-menu", "volume-panel"].includes(id); nodes.set(id, el); } return nodes.get(id); };
 let handlers;
 const sent = [];
-let time = 0;
-let timerId = 0;
-const timers = new Map();
 const pageEvents = {};
 const documentEvents = {};
-function advance(ms) {
-  const until = time + ms;
-  while (true) {
-    const next = [...timers].sort((a, b) => a[1].at - b[1].at)[0];
-    if (!next || next[1].at > until) break;
-    time = next[1].at;
-    timers.delete(next[0]);
-    next[1].fn();
-  }
-  time = until;
-}
+
 const context = createContext({
   document: { getElementById: node, createElement: tag => element("", tag), addEventListener(type, handler) { documentEvents[type] = handler; }, querySelectorAll: () => [], querySelector: () => element() },
   Room: { code: "123", ready: Promise.resolve(true), connect(value) { handlers = value; }, send: value => sent.push(JSON.parse(JSON.stringify(value))) },
-  Date: class extends Date { static now() { return time; } },
-  setTimeout(fn, delay) { const id = ++timerId; timers.set(id, { fn, at: time + delay }); return id; },
-  clearTimeout(id) { timers.delete(id); },
   window: { innerHeight: 800, innerWidth: 320, scrollBy() {}, addEventListener(type, handler) { pageEvents[type] = handler; } },
   setConnectionStatus(status) { node("connection").dataset.status = status; },
   renderNowPlaying(state) { node("auto-queue-status").textContent = [state.autoQueue && "เล่นต่ออัตโนมัติเปิดอยู่", state.autoQueueStatus === "loading" && "กำลังหาเพลงแนะนำ…"].filter(Boolean).join(" · "); },
@@ -116,7 +100,7 @@ assert.deepEqual(sent.at(-1), { type: "setCooldown", seconds: 0 });
 handlers.onState({ state, code: "123", memberId: "helper", primaryAdminId: "owner", role: "controller", participants,
   cooldownSeconds: 0 });
 assert.equal(node("admin-cooldown-label").textContent, "เวลารอ: 0 วินาที");
-// Fake time exercises real queue buttons and transport calls.
+// Exercise the actual queue buttons and transport calls.
 const items = [1, 2, 3].map(n => ({ id: `queue-${n}`, title: `Song ${n}`, channel: "Artist" }));
 const snapshot = (queue = items, role = "controller") => handlers.onState({
   state: { ...state, queue }, code: "123", role, participants,
@@ -125,8 +109,6 @@ const rowFor = id => node("queue").children.find(row => row.dataset.id === id);
 const more = id => rowFor(id).children[3].children[0];
 const actions = id => { more(id).onclick(); return node("queue-menu").children; };
 const remove = id => { actions(id).find(button => button.dataset.queueAction === "remove").onclick(); };
-const cancel = id => { const button = rowFor(id).children[4].children[1]; button.focus(); button.onclick(); };
-const countdown = id => rowFor(id).children[4].children[0].textContent;
 const deletions = () => sent.filter(message => message.type === "remove");
 snapshot();
 assert.equal(rowFor("queue-1").children[3].children.length, 1, "Rows expose a single More action");
@@ -141,63 +123,27 @@ assert.deepEqual(sent.at(-1), { type: "move", id: "queue-2", dir: "up" });
 actions("queue-2")[2].onclick();
 assert.deepEqual(sent.at(-1), { type: "move", id: "queue-2", dir: "down" });
 remove("queue-1");
-assert.equal(countdown("queue-1"), "ลบใน 5 วินาที");
-assert.equal(context.document.activeElement.className, "cancel-removal", "Deletion keeps keyboard focus on cancellation");
-assert.equal(deletions().length, 0);
-advance(2000);
-assert.equal(countdown("queue-1"), "ลบใน 3 วินาที");
-snapshot();
-assert.equal(countdown("queue-1"), "ลบใน 3 วินาที", "Snapshots retain the deadline");
-assert.equal(context.document.activeElement.className, "cancel-removal", "Queue updates retain cancellation focus");
-runInContext('startRemoval("queue-1")', context);
-remove("queue-2");
-assert.equal(countdown("queue-2"), "ลบใน 5 วินาที");
-advance(1000);
-cancel("queue-2");
-assert.equal(context.document.activeElement.className, "queue-more", "Cancellation returns focus to More");
-advance(1999);
-assert.equal(deletions().length, 0, "Deletion is not sent before five seconds");
-advance(1);
-assert.deepEqual(deletions(), [{ type: "remove", id: "queue-1" }]);
-advance(5000);
-assert.equal(deletions().length, 1, "Cancelled deletion is never sent");
-// Queue removal and promotion both remove the item from the upcoming queue.
-for (const disappeared of ["removed", "promoted"]) {
-  snapshot();
-  remove("queue-1");
-  snapshot(items.slice(1));
-  advance(5000);
-  assert.equal(deletions().length, 1, `${disappeared} item cancels its pending deletion`);
-}
-for (const stop of [() => handlers.onOffline(), () => snapshot(items, "guest"), () => handlers.onEnd(), () => pageEvents.pagehide()]) {
-  snapshot();
-  remove("queue-1");
-  stop();
-  advance(5000);
-  assert.equal(deletions().length, 1, "Disconnect, lost role, exit, and page navigation cancel pending deletion");
-}
-pageEvents.pageshow({ persisted: true });
-assert.equal(rowFor("queue-1").children.length, 4, "Back from browser cache does not restore pending deletion");
-snapshot(items, "guest");
-assert.equal(list.children.length, 0);
-assert.equal(node("participants-tab").hidden, true);
-// Multiple deadlines fire independently, even during a drag.
-snapshot();
-remove("queue-1");
-advance(1000);
-remove("queue-2");
+assert.deepEqual(deletions(), [{ type: "remove", id: "queue-1" }], "Removal is sent immediately");
+assert.equal(node("queue-menu").hidden, true);
+snapshot(items.slice(1));
+assert.equal(context.document.activeElement, more("queue-2"), "Removing the focused row moves focus to the remaining menu");
+assert.equal(node("setting-keepQueue").hidden, true, "Controller cannot change the new room settings");
+snapshot(items, "admin");
+assert.equal(node("setting-keepQueue").hidden, false);
+assert.equal(node("setting-keepQueue").getAttribute("aria-pressed"), "false");
+assert.equal(node("setting-showPlayerQr").getAttribute("aria-pressed"), "true");
+node("setting-keepQueue").onclick();
+assert.deepEqual(sent.at(-1), { type: "setRoomSetting", setting: "keepQueue", enabled: true });
 const rows = node("queue").children;
 const handle = rows[0].children[0];
 context.document.elementFromPoint = () => rows[2];
 handle.onpointerdown({ button: 0, pointerId: 1 });
-advance(4000);
-assert.equal(deletions().length, 2);
 handle.onpointermove({ clientX: 0, clientY: 150, pointerId: 1 });
 handle.onpointerup();
 assert.deepEqual(sent.at(-1), { type: "reorder", ids: ["queue-2", "queue-3", "queue-1"] }, "Drag reorder still sends every queue ID");
-advance(1000);
-assert.equal(deletions().length, 3);
-assert.equal(timers.size, 0);
+snapshot(items, "guest");
+assert.equal(list.children.length, 0);
+assert.equal(node("participants-tab").hidden, true);
 snapshot();
 actions("queue-1");
 node("queue-menu").onkeydown({ key: "ArrowDown", preventDefault() {} });
@@ -244,4 +190,4 @@ const beforeClear = sent.length;
 node("admin-clear").onclick();
 assert.equal(sent.length, beforeClear, "Cancelling clear sends no command");
 assert.match(readFileSync(new URL("../public/admin.html", import.meta.url), "utf8"), /id="admin-clear"[^>]*hidden/, "Clear remains hidden as before");
-console.log("PASS: Admin/Controller roster and grant-only permissions; cancellable independent five-second removals; snapshots/role loss/disconnect/drag; queue actions and settings (DOM simulated).");
+console.log("PASS: Admin/Controller roster and grant-only permissions; immediate removal; snapshot focus/drag; queue actions and settings (DOM simulated).");

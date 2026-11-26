@@ -20,70 +20,65 @@
 <body data-screen="player">
   <div id="room-content" hidden>
   <main id="stage">
-    <section class="player-pane">
-      <div id="player-wrap" tabindex="-1">
-        <div id="player"></div>
-        <div id="idle" class="hidden">
-          <div class="idle-emoji">🎧</div>
-          <p data-i18n="No song playing">ยังไม่มีเพลง</p>
-          <p class="idle-sub" data-i18n="Scan the QR code to add the first song!">สแกน QR เพื่อเพิ่มเพลงแรก</p>
-        </div>
-        <button id="fullscreen" type="button" title="วิดีโอเต็มจอ (F)" aria-label="วิดีโอเต็มจอ (F)" aria-pressed="false" data-i18n-title="Video fullscreen (f)" data-i18n-aria-label="Video fullscreen (f)">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6" /></svg>
-        </button>
+    <div id="player-wrap" tabindex="-1">
+      <div id="player"></div>
+      <div id="idle" class="hidden">
+        <div class="idle-emoji">🎧</div>
+        <p data-i18n="No song playing">ยังไม่มีเพลง</p>
+        <p class="idle-sub" id="request-hint" data-i18n="Scan the QR code to add the first song!">สแกน QR เพื่อเพิ่มเพลงแรก</p>
       </div>
-      <div id="now-meta">
-        <div id="now-label" class="now-label hidden">
-          <span class="eq"><span></span><span></span><span></span></span>
-          <span class="np-th" data-i18n="nowPlaying">กำลังเล่น</span>
-          <span class="np-en" data-i18n="Now Playing">Now Playing</span>
-        </div>
+      <button id="fullscreen" type="button" title="วิดีโอเต็มจอ (F)" aria-label="วิดีโอเต็มจอ (F)" aria-pressed="false" data-i18n-title="Video fullscreen (f)" data-i18n-aria-label="Video fullscreen (f)">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6" /></svg>
+      </button>
+    </div>
+
+    <div id="now-meta">
+      <button id="playpause" class="player-button" type="button" data-i18n-title="Play / Pause (space)" data-i18n-aria-label="Play / Pause (space)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4.5" height="14" rx="1.5"/><rect x="13.5" y="5" width="4.5" height="14" rx="1.5"/></svg>
+      </button>
+      <button id="skip" class="player-button" type="button" data-i18n-title="Skip (n)" data-i18n-aria-label="Skip (n)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5v14l10-7z"/><rect x="17" y="5" width="2.6" height="14" rx="1"/></svg>
+      </button>
+      <div class="now-song">
         <div id="now-title">—</div>
         <div id="now-channel"></div>
       </div>
-      <div id="controls">
-        <button id="playpause" title="เล่น / หยุดชั่วคราว (Space)" data-i18n-title="Play / Pause (space)">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4.5" height="14" rx="1.5"></rect><rect x="13.5" y="5" width="4.5" height="14" rx="1.5"></rect></svg>
-        </button>
-        <button id="skip" title="ข้ามเพลง (N)" data-i18n-title="Skip (n)">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5v14l10-7z"></path><rect x="17" y="5" width="2.6" height="14" rx="1"></rect></svg>
-        </button>
-        <button id="qr-toggle" class="pill" type="button" aria-pressed="true" data-i18n="showQR">แสดง QR</button>
-        <button id="auto-queue-toggle" class="pill" type="button" aria-pressed="false">เล่นต่ออัตโนมัติ: ปิด</button>
-        <button id="context-toggle" class="pill" hidden title="ระบุประเภทงานสำหรับตัวกรอง AI" data-i18n-title="Event context — tell the AI filter what kind of event this is">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6.5-4.3-6.5-10a6.5 6.5 0 0113 0c0 5.7-6.5 10-6.5 10z"></path><circle cx="12" cy="10.5" r="2.4"></circle></svg>
-          <span data-i18n="Event context">ประเภทงาน</span>
-        </button>
-        <button id="exit-room" class="pill" type="button" data-i18n="exit">ออก</button>
-        <div class="vol">
-          <svg width="18" height="18" viewBox="0 0 24 24"><path d="M4 9.5v5h3.6l4.9 4V5.5l-4.9 4H4z" fill="currentColor"></path><path d="M16.2 9.3a4.3 4.3 0 010 5.9" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"></path><path d="M18.6 6.8a8 8 0 010 10.9" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"></path></svg>
-          <input id="volume" aria-label="ระดับเสียง" data-i18n-aria-label="volume" type="range" min="0" max="100" value="60" />
-        </div>
-      </div>
-      <p id="auto-queue-status" role="status" aria-live="polite"></p>
-      <div id="context-row" class="context-row hidden">
-        <input id="context-input" type="text" maxlength="300"
-               placeholder="ประเภทงาน เช่น งานเลี้ยงจบการศึกษา งานแต่งงาน" data-i18n-placeholder="Event context, e.g. a graduation party or wedding" />
-        <button id="context-save" data-i18n="Save">บันทึก</button>
-      </div>
-    </section>
+    </div>
 
-    <aside class="sidebar">
+    <aside id="player-sidebar" class="sidebar">
       <div id="qr-card" class="qr-card" hidden>
         <div class="qr-title" data-i18n="Scan to request a song">สแกนเพื่อเพิ่มเพลง</div>
-        <div class="qr-sub" data-i18n="Scan to add a song">Scan to add a song</div>
         <div class="qr-frame"><img id="qr" alt="คิวอาร์โค้ด" data-i18n-alt="QR code" /></div>
+        <div id="player-room-label"></div>
         <div id="guest-url" class="guest-url"></div>
       </div>
-      <div class="queue-card">
+      <div id="player-queue-card" class="queue-card">
         <div class="queue-head">
           <span data-i18n="queue"></span> <small data-i18n="Up Next">Up Next</small> <span id="queue-count" class="count">0</span>
         </div>
         <ul id="queue"></ul>
       </div>
     </aside>
+    <div id="controls">
+      <div class="vol">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.6l4.9 4V5.5l-4.9 4H4z" fill="currentColor"/><path d="M16.2 9.3a4.3 4.3 0 010 5.9m2.4-8a8 8 0 010 10.9" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+        <input id="volume" aria-label="ระดับเสียง" data-i18n-aria-label="volume" type="range" min="0" max="100" value="60" />
+      </div>
+      <button id="exit-room" class="player-button" type="button" aria-haspopup="dialog" data-i18n-title="exitPlayer" data-i18n-aria-label="exitPlayer">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4H4v16h6m4-13 5 5-5 5m5-5H9"/></svg>
+      </button>
+    </div>
+    <p id="player-status" role="status" aria-live="polite"></p>
   </main>
 
+  <dialog id="exit-dialog" aria-labelledby="exit-title" aria-describedby="exit-description">
+    <h2 id="exit-title" data-i18n="confirmExitPlayer">ออกจากห้องนี้หรือไม่?</h2>
+    <p id="exit-description" data-i18n="exitPlayerDescription">เครื่องเล่นนี้จะหยุดเล่นและกลับหน้าแรก</p>
+    <div class="exit-actions">
+      <button id="cancel-exit" type="button" data-i18n="cancel" autofocus>ยกเลิก</button>
+      <button id="confirm-exit" type="button" data-i18n="exitPlayer">ออกจากห้อง</button>
+    </div>
+  </dialog>
   </div>
   <script src="/i18n.js"></script>
   <script src="/session.js"></script>

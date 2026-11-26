@@ -119,7 +119,12 @@ app.get("/api/sessions/available", (_req, res) => {
   res.set("Cache-Control", "no-store").json({ codes: sessions.availableCodes(2) });
 });
 app.post("/api/sessions/random", checkAttempts, (req, res) => {
-  const { code } = req.body || {};
+  if (Array.isArray(req.body)) return fail(req, res, 400, "กรุณากรอกเลขห้อง 3 หลัก");
+  let { code } = req.body || {};
+  if (code === undefined) {
+    [code] = sessions.availableCodes(1);
+    if (!code) return res.status(409).json({ error: "ห้องเต็ม กรุณาลองใหม่ภายหลัง" });
+  }
   if (typeof code !== "string" || code.length !== 3 || !/^[1-9][0-9]{2}$/.test(code)) {
     return fail(req, res, 400, "กรุณากรอกเลขห้อง 3 หลัก");
   }
@@ -133,10 +138,15 @@ app.post("/api/sessions", checkAttempts, requirePlayerCode, (req, res) => {
   openPlayer(room, res);
 });
 app.post("/api/sessions/join", checkAttempts, findRoom, (req, res) => {
-  const saved = sessions.authenticate(tokenFrom(req), req.room.id);
-  const member = saved?.room === req.room && saved.role !== "player" ? saved : sessions.issue(req.room, "guest");
+  const room = req.room;
+  let member = sessions.authenticate(tokenFrom(req), room.id);
+  res.set("Cache-Control", "no-store");
+  if (member?.room !== room || member.role === "player") {
+    if (!room.state.allowQueueJoin) return res.status(403).json({ error: "ห้องนี้ปิดรับผู้เข้าร่วมจัดคิวใหม่" });
+    member = sessions.issue(room, "guest");
+  }
   if (typeof req.body.name === "string" && req.body.name.trim()) member.name = req.body.name.trim().slice(0, 40);
-  res.set("Cache-Control", "no-store").json(memberInfo(member));
+  res.json(memberInfo(member));
 });
 app.post("/api/sessions/close", requireMember, (req, res) => {
   if (req.member.role !== "player") return res.status(403).json({ error: "เฉพาะ Player เท่านั้นที่ปิดห้องได้" });
@@ -357,6 +367,7 @@ wss.on("connection", (ws) => {
     const member = sessions.authenticate(ws.member?.token);
     if (!member || member !== ws.member || member.role === "guest" ||
         (["ended", "error"].includes(msg.type) && member.role !== "player") ||
+        (msg.type === "setRoomSetting" && member.role !== "admin") ||
         (["setParticipantRole", "setFilter", "setCooldown"].includes(msg.type) &&
           !["admin", "controller"].includes(member.role))) {
       ws.send(JSON.stringify({ type: "error", error: "ไม่มีสิทธิ์ควบคุมเพลง" }));
@@ -402,6 +413,9 @@ wss.on("connection", (ws) => {
         break;
       case "setAutoQueue":
         state.setAutoQueue(msg.enabled);
+        break;
+      case "setRoomSetting":
+        state.setRoomSetting(msg.setting, msg.enabled);
         break;
       case "setParticipantRole": {
         const target = room.members.get(msg.id);

@@ -110,8 +110,12 @@
       <form method="dialog"><button class="icon-button" data-i18n-title="close" data-i18n-aria-label="close"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></form>
     </div>
     <div class="settings-actions">
+    <button id="setting-allowQueueJoin" type="button" aria-pressed="true" hidden disabled>อนุญาตให้เข้าร่วมจัดคิว</button>
     <button id="admin-auto-queue" type="button" aria-pressed="false" disabled>เล่นต่ออัตโนมัติ: ปิด</button>
     <button id="admin-cooldown" type="button" data-i18n-title="Per-guest request cooldown — click to change" disabled><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="admin-cooldown-label"></span></button>
+    <button id="setting-keepQueue" type="button" aria-pressed="false" hidden disabled>ไม่ลบคิวเพลง</button>
+    <button id="setting-showPlayerQr" type="button" aria-pressed="true" hidden disabled>แสดง QR บนเครื่องเล่น</button>
+    <button id="setting-showPlayerQueue" type="button" aria-pressed="true" hidden disabled>แสดงคิวเพลงบนเครื่องเล่น</button>
     <button id="admin-clear" type="button" hidden data-i18n-title="clear" data-i18n-aria-label="clear" disabled><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg><span data-i18n="clear"></span></button>
     </div>
     <p class="settings-hint" data-i18n="cooldownHelp"></p>

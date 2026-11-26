@@ -13,42 +13,24 @@ const Room = (() => {
   const panel = document.createElement("section");
   panel.className = `session-panel${isPlayer ? " player-entry" : ""}`;
   const joinForm = `
-    <form id="room-join" ${isPlayer ? 'class="room-option" tabindex="-1" aria-labelledby="join-room-title"' : ""}>
-      <h2 id="join-room-title"${isPlayer ? ' class="room-option-title"' : ""}>${isPlayer ? '<span class="room-option-icon" data-icon="↪" aria-hidden="true"></span>' : ""}${t(isPlayer ? "joinMusicQueue" : "joinRoom")}</h2>
+    <form id="room-join"${isPlayer ? " hidden" : ""} aria-labelledby="join-room-title">
+      <h2 id="join-room-title">${t("joinRoom")}</h2>
       <label>${t("roomNumber")} <input id="room-code" type="text" inputmode="numeric" pattern="[1-9][0-9]{2}" maxlength="3" autocomplete="off" required></label>
       <button type="submit">${t("enterRoom")}</button>
     </form>`;
   panel.innerHTML = `
     <p id="room-error" role="status" aria-live="polite"></p>
-    <div id="room-welcome" class="start-card" ${isPlayer ? "" : "hidden"}>
-      <img class="start-logo" src="/icons/qp.svg" width="104" height="104" alt="" aria-hidden="true">
-      <h1>${t("Event Music System")}</h1>
-      <p>${t("Click to start the jukebox.")}</p>
-      <button id="start-btn" type="button">${t("▶  Start")}</button>
-      <small>${t("Make sure this window's audio goes to the venue's AV system.")}</small>
-    </div>
     ${isPlayer ? `
-      <section id="room-options" aria-labelledby="room-options-title" hidden>
-        <h1 id="room-options-title">${t("chooseRoom")}</h1>
-        <div class="room-options-grid">
-          ${joinForm}
-          ${[1, 2].map((number) => `
-            <button class="room-option random-room" id="random-room-${number}" type="button" disabled>
-              <span class="room-option-title"><span class="room-option-icon" data-icon="♫" aria-hidden="true"></span>${t("createMusicRoom")}</span>
-              <strong id="random-code-${number}">—</strong>
-            </button>`).join("")}
-          <div id="manual-room" class="room-option" role="group" aria-labelledby="manual-room-title" tabindex="-1">
-            <form id="room-create">
-              <h2 id="manual-room-title" class="room-option-title"><span class="room-option-icon" data-icon="+" aria-hidden="true"></span>${t("createOrJoinPlayer")}</h2>
-              <label>${t("roomNumber")} <input id="entry-code" type="text" inputmode="numeric" pattern="[1-9][0-9]{2}" maxlength="3" autocomplete="off" required></label>
-              <button type="submit">${t("createOrJoin")}</button>
-            </form>
-            <button id="resume-player" class="room-secondary" type="button" hidden></button>
-          </div>
+      <div id="room-welcome" class="start-card">
+        <img class="start-logo" src="/icons/qp.svg" width="104" height="104" alt="">
+        <h1>${t("Event Music System")}</h1>
+        <button id="start-btn" type="button">${t("▶  Start")}</button>
+        ${joinForm}
+        <div class="entry-actions">
+          <button id="open-player-entry" type="button" aria-controls="room-join" aria-expanded="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4m-2-14 5 3.5-5 3.5Z"/></svg>${t("playerEntry")}</button>
+          <button id="open-queue-entry" type="button" aria-controls="room-join" aria-expanded="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h8m7 0v6m-3-3h6"/></svg>${t("queueEntry")}</button>
         </div>
-        <p id="room-options-status" role="status"></p>
-        <button id="room-options-refresh" class="room-secondary" type="button" hidden>${t("refreshRoomChoices")}</button>
-      </section>` : joinForm}
+      </div>` : joinForm}
     <p id="room-retry" role="status" aria-live="polite"></p>`;
   document.body.prepend(panel);
   const node = (id) => document.getElementById(id);
@@ -56,32 +38,8 @@ const Room = (() => {
   document.body.dataset.roomActive = "false";
   node("room-code").value = params.get("room") || "";
   const key = (id, player) => `music-session:${id}:${player ? "player" : "member"}`;
-  const lastPlayerKey = "music-last-player";
   const credentialStorage = (player) => player ? sessionStorage : localStorage;
-  function recentPlayer() {
-    let previous;
-    try { previous = JSON.parse(localStorage.getItem(lastPlayerKey) || "null"); } catch {
-      localStorage.removeItem(lastPlayerKey);
-      return null;
-    }
-    if (!previous) return null;
-    if (!/^[1-9][0-9]{2}$/.test(previous.code) || typeof previous.sessionId !== "string" || !previous.sessionId ||
-        typeof previous.token !== "string" || !previous.token) {
-      localStorage.removeItem(lastPlayerKey);
-      return null;
-    }
-    if ((params.get("room") && params.get("room") !== previous.code) ||
-        (params.get("session") && params.get("session") !== previous.sessionId)) return null;
-    return previous;
-  }
-  function forgetPlayer(member) {
-    let previous;
-    try { previous = JSON.parse(localStorage.getItem(lastPlayerKey) || "null"); } catch {
-      localStorage.removeItem(lastPlayerKey);
-    }
-    if (previous?.sessionId === member.sessionId && previous?.token === member.token) localStorage.removeItem(lastPlayerKey);
-    if (sessionStorage.getItem(key(member.sessionId, true)) === member.token) sessionStorage.removeItem(key(member.sessionId, true));
-  }
+  if (isPlayer) localStorage.removeItem("music-last-player");
   function saved(code, id, player) {
     const knownId = id || localStorage.getItem(`music-room:${code}`);
     return knownId ? credentialStorage(player).getItem(key(knownId, player)) : null;
@@ -92,7 +50,6 @@ const Room = (() => {
     stopped = false;
     credentialStorage(member.role === "player").setItem(key(member.sessionId, member.role === "player"), member.token);
     localStorage.setItem(`music-room:${member.code}`, member.sessionId);
-    if (member.role === "player") localStorage.setItem(lastPlayerKey, JSON.stringify({ code: member.code, sessionId: member.sessionId, token: member.token }));
   }
   function url(target) {
     return `${target === "player" ? "/" : target === "admin" ? "/a" : "/guest"}?room=${current.code}&session=${current.sessionId}`;
@@ -118,7 +75,6 @@ const Room = (() => {
     stopped = true;
     authenticated = false;
     clearTimeout(retry);
-    if (current?.role === "player" && forget) forgetPlayer(current);
     if (current && forget && credentialStorage(current.role === "player").getItem(key(current.sessionId, current.role === "player")) === current.token) {
       credentialStorage(current.role === "player").removeItem(key(current.sessionId, current.role === "player"));
     }
@@ -129,10 +85,8 @@ const Room = (() => {
     document.body.dataset.roomActive = "false";
     if (content) content.hidden = true;
     if (isPlayer) {
-      node("room-options").hidden = true;
-      node("room-welcome").hidden = false;
+      setEntryMode(null);
       node("room-code").value = "";
-      node("entry-code").value = "";
       node("start-btn").focus();
     }
     node("room-error").textContent = message;
@@ -212,31 +166,49 @@ const Room = (() => {
     return false;
   }
   const joinFormNode = node("room-join");
-  const entryButtons = [joinFormNode.querySelector('button[type="submit"]')];
-  const randomButtons = isPlayer ? [node("random-room-1"), node("random-room-2")] : [];
-  let randomCodes = [];
-  let optionsRequest = 0;
+  const joinSubmit = joinFormNode.querySelector('button[type="submit"]');
+  const playerEntry = isPlayer ? node("open-player-entry") : null;
+  const queueEntry = isPlayer ? node("open-queue-entry") : null;
+  let entryMode = null;
   let busy = false;
   let retryUntil = 0;
-  function updateEntryButtons() {
-    const locked = busy || Date.now() < retryUntil;
-    for (const button of entryButtons) button.disabled = locked;
-    randomButtons.forEach((button, index) => { button.disabled = locked || !randomCodes[index]; });
-  }
+  let queueRetryUntil = 0;
+  let countdownTimer;
+  let missingRoomMessage = "";
+
   function countdown() {
-    updateEntryButtons();
-    const remaining = retryUntil - Date.now();
+    clearTimeout(countdownTimer);
+    const remaining = Math.max(retryUntil, entryMode === "queue" ? queueRetryUntil : 0) - Date.now();
+    joinSubmit.disabled = busy || remaining > 0;
+    if (isPlayer) {
+      playerEntry.disabled = queueEntry.disabled = busy;
+      node("start-btn").disabled = busy || Date.now() < retryUntil;
+    }
     node("room-retry").textContent = remaining > 0 ? t("entryRetry", { seconds: Math.ceil(remaining / 1000) }) : "";
-    if (remaining > 0) setTimeout(countdown, Math.min(1000, remaining));
+    if (remaining > 0) countdownTimer = setTimeout(countdown, Math.min(1000, remaining));
   }
-  async function runEntry(action) {
-    if (busy || Date.now() < retryUntil) return;
+  function setEntryMode(mode) {
+    entryMode = mode;
+    joinFormNode.hidden = !mode;
+    playerEntry.setAttribute("aria-expanded", String(mode === "player"));
+    queueEntry.setAttribute("aria-expanded", String(mode === "queue"));
+    node("join-room-title").textContent = t(mode === "player" ? "playerEntry" : "queueEntry");
+    joinSubmit.textContent = t(mode === "player" ? "createOrJoin" : "enterRoom");
+    node("room-error").textContent = mode === "queue" && Date.now() < queueRetryUntil ? missingRoomMessage : "";
+    countdown();
+    if (mode) node("room-code").focus();
+  }
+  async function runEntry(action, mode) {
+    if (busy || Date.now() < Math.max(retryUntil, mode === "queue" ? queueRetryUntil : 0)) return;
     busy = true;
-    updateEntryButtons();
+    countdown();
     node("room-error").textContent = "";
     try { await action(); } catch (error) {
-      node("room-error").textContent = error.message;
-      if ([400, 401, 410, 429].includes(error.status)) {
+      node("room-error").textContent = error.status ? error.message : t("networkError");
+      if (mode === "queue" && error.status === 410) {
+        missingRoomMessage = error.message;
+        queueRetryUntil = Date.now() + 10000;
+      } else if ([400, 401, 410, 429].includes(error.status)) {
         const seconds = Number(error.retryIn);
         const wait = error.status === 429 && Number.isFinite(seconds) && seconds > 0 ? seconds : 5;
         retryUntil = Date.now() + wait * 1000;
@@ -246,101 +218,40 @@ const Room = (() => {
       countdown();
     }
   }
-  function submit(form, action) {
-    form.onsubmit = (event) => {
-      event.preventDefault();
-      return runEntry(action);
-    };
-  }
   function openPlayer(member) {
     remember(member);
-    node("entry-code").value = "";
+    setEntryMode(null);
+    node("room-code").value = "";
     applyState({ role: "player" });
     history.replaceState(null, "", url("player"));
     Room.onJoined?.(); // Keep the creation gesture in this document for browser audio.
   }
-  async function loadRoomOptions() {
-    const request = ++optionsRequest;
-    const status = node("room-options-status");
-    const refresh = node("room-options-refresh");
-    randomCodes = [];
-    randomButtons.forEach((_, index) => { node(`random-code-${index + 1}`).textContent = "—"; });
-    updateEntryButtons();
-    refresh.hidden = true;
-    status.textContent = t("loadingRoomChoices");
-    try {
-      const { codes } = await api("/api/sessions/available");
-      if (request !== optionsRequest) return;
-      randomCodes = codes;
-      randomButtons.forEach((_, index) => { node(`random-code-${index + 1}`).textContent = codes[index] || "—"; });
-      status.textContent = codes.length ? "" : t("noRoomChoices");
-      refresh.hidden = codes.length > 0;
-    } catch (error) {
-      if (request !== optionsRequest) return;
-      status.textContent = error.status ? error.message : t("networkError");
-      refresh.hidden = false;
-    } finally {
-      if (request === optionsRequest) updateEntryButtons();
-    }
-  }
-  submit(joinFormNode, async () => {
-    const code = node("room-code").value;
-    remember(await post("/api/sessions/join", { code }, saved(code, null, false)));
-    location.replace(url(privileged() ? "admin" : "guest"));
-  });
-  if (isPlayer) {
-    const createForm = node("room-create");
-    const resumeButton = node("resume-player");
-    entryButtons.push(createForm.querySelector('button[type="submit"]'), resumeButton);
-    submit(createForm, async () => {
-      const roomNumber = node("entry-code").value;
-      const digitSum = [...roomNumber].reduce((sum, digit) => sum + Number(digit), 0);
-      openPlayer(await post("/api/sessions", { code: `${roomNumber}${digitSum}` }));
-    });
-    randomButtons.forEach((button, index) => {
-      button.onclick = () => {
-        const code = randomCodes[index];
-        if (!code) return;
-        return runEntry(async () => {
-          try { openPlayer(await post("/api/sessions/random", { code })); }
-          catch (error) {
-            if (error.status === 409) void loadRoomOptions();
-            throw error;
-          }
-        });
-      };
-    });
-    resumeButton.onclick = () => runEntry(async () => {
-      const previous = recentPlayer();
-      if (!previous) { resumeButton.hidden = true; return; }
-      const status = node("room-error");
-      status.textContent = t("resumingPlayer");
-      try {
-        const member = await api("/api/info", {}, previous.token, previous.sessionId);
-        if (member.role === "player" && member.code === previous.code && member.sessionId === previous.sessionId) {
-          status.textContent = "";
-          openPlayer(member);
-          return;
-        }
-        status.textContent = t("roomUnavailable");
-      } catch (error) {
-        status.textContent = error.status ? error.message : t("networkError");
-        if (![401, 403, 410].includes(error.status)) return;
+  joinFormNode.onsubmit = (event) => {
+    event.preventDefault();
+    if (isPlayer && !entryMode) return;
+    return runEntry(async () => {
+      const code = node("room-code").value;
+      if (entryMode === "player") {
+        const sum = [...code].reduce((total, digit) => total + Number(digit), 0);
+        openPlayer(await post("/api/sessions", { code: `${code}${sum}` }));
+        return;
       }
-      forgetPlayer(previous);
-      resumeButton.hidden = true;
-    });
-    node("room-options-refresh").onclick = loadRoomOptions;
-    node("start-btn").onclick = () => {
-      const previous = recentPlayer();
-      resumeButton.hidden = !previous;
-      if (previous) resumeButton.textContent = t("resumeLatestRoom", { code: previous.code });
-      node("room-welcome").hidden = true;
-      node("room-options").hidden = false;
-      joinFormNode.focus();
-      return loadRoomOptions();
-    };
+      remember(await post("/api/sessions/join", { code }, saved(code, null, false)));
+      location.replace(url(privileged() ? "admin" : "guest"));
+    }, entryMode);
+  };
+  if (isPlayer) {
+    playerEntry.onclick = () => setEntryMode("player");
+    queueEntry.onclick = () => setEntryMode("queue");
+    node("start-btn").onclick = () => runEntry(async () => openPlayer(await post("/api/sessions/random", {})));
     node("start-btn").focus();
+  }
+  function closeEntry() {
+    if (!entryMode || busy) return false;
+    const trigger = entryMode === "player" ? playerEntry : queueEntry;
+    setEntryMode(null);
+    trigger.focus();
+    return true;
   }
   async function init() {
     const code = params.get("room");
@@ -365,7 +276,7 @@ const Room = (() => {
       return false;
     }
   }
-  return { ready: init(), fetch: api, connect, send, finish: end,
+  return { ready: init(), fetch: api, connect, send, finish: end, closeEntry,
     leave() { end("", true); },
     get connected() { return authenticated && socket?.readyState === WebSocket.OPEN; },
     get sessionId() { return current?.sessionId; },

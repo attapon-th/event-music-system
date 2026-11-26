@@ -5,8 +5,7 @@ guests requesting songs, and authorized Admins/Controllers managing playback.
 Extend the existing implementation and preserve that workflow.
 
 Read [CONTEXT.md](CONTEXT.md) when naming or changing domain concepts. Read
-[README.md](README.md) for configuration, HTTP/WebSocket payloads, and the
-manual test procedure.
+[README.md](README.md) for user-facing room entry and settings.
 
 ## Working sequence
 
@@ -51,24 +50,22 @@ There is no frontend bundler or compilation step.
 - Use queue item `id` for editing and YouTube `videoId` for duplicate detection.
   Player `ended`/`error` reports must match both current item `id` and `videoId`;
   duplicate reports from multiple Players must advance only once.
-- Admin/Controller queue removal waits five seconds per item before sending `remove`.
-  Cancel on user cancellation, item disappearance/promotion, disconnect, role loss,
-  or page exit (including browser cache). Snapshots never reset the deadline.
-  Keep drag reorder and Play Now; no up/down buttons in this tab.
+- Admin/Controller queue removal sends `remove` immediately with the selected
+  queue item ID. Keep drag reorder and Play Now.
+- Keep Queue recycles requested songs with a new occurrence ID. Derive the ID
+  the same way during server playback and cached Player playback so offline
+  reports reconcile in order. Admin owns Keep Queue and Player visibility.
 - Recheck duplicate and queue-cap conditions after asynchronous YouTube
   work. The request limit is 50 upcoming tracks; history is capped at 100 items.
 - Playback state and volume belong to the server snapshot. Player applies them
   through the IFrame API; Admin remains a controller rather than an audio source.
   New rooms start at 60% volume, applied before loading the first video, with
   Auto Queue enabled and a five-second request cooldown.
-- Root entry offers four cards after Start. A three-digit room number joins through
-  the existing join API. Two cards offer distinct unused numbers and create new Player
-  rooms. `POST /api/sessions/random` rejects a room number taken since it was offered.
-  The manual creation card accepts the three-digit room number (`100–999`). The
-  browser appends its digit sum without zero padding (`1236`, `78924`) for the API.
-  `POST /api/sessions` takes `{ code }`, validates on the server, and atomically
-  creates or reuses that room. `HOST_PASSWORD` is ignored and optional. Failed entry
-  locks browser submission for five seconds; HTTP 429 carries the remaining retry time.
+- Start makes a room with a random unused three-digit number in one request.
+  The Player entry form appends the digits' sum without zero padding for
+  `POST /api/sessions`, which creates or reuses the numbered room atomically.
+  The queue entry form joins existing rooms and waits ten seconds after a
+  missing number. HTTP 429 carries the remaining retry time.
 - Every WebSocket authenticates a room credential before receiving a snapshot.
   The first participant joining by room number or QR becomes the primary Admin
   atomically during admission and opens `/a`. Later participants are Guests;
@@ -108,24 +105,21 @@ There is no frontend bundler or compilation step.
   and touch targets. Reacquire pointer capture after moving a dragged row in the DOM.
 - Keep the `คิวเพลิน by "{nickname}"` heading with Thai nicknames, icon search/queue tabs,
   and 16px search inputs. Wrap long result metadata inside its shrinking flex column.
-  Player event context and Admin clear are hidden; the filter button is removed.
+  Keep room presentation controls in Admin settings.
   Admin cooldown shows its value in the button. `/g` redirects to `/guest` with queries intact.
 - Explore shows a shuffled country chart without category buttons, paged from one response in
   five-song batches. Search mode buttons control specific searches.
   Auto Queue uses regular YouTube WEB watch recommendations based on the latest
   video, preserving recommendation order and the 10-minute duration limit.
   Room nicknames survive refresh/reconnect within the same session.
-- Player entry shows the welcome screen first. Start reveals the four cards, including
-  the latest-room shortcut on the manual creation card. The TV remote uses arrow keys
-  and OK on both screens. Successful creation opens Player,
-  and leaving restores welcome. Multiple Players share song/queue/pause/volume;
-  a new Player starts the current song at its beginning, without position sync.
-  Handle autoplay blocking with
-  the existing play button without skipping tracks. Preserve playback-error handling,
-  the watchdog's hidden-tab/buffering exceptions, and reconnect authentication.
+- The welcome screen offers Start, Player entry and queue entry. Support
+  keyboard and TV remote navigation in the welcome form and Player controls.
+  Multiple Players share song, queue, pause and volume. A new Player starts
+  the current song from its beginning. Keep the play button for autoplay
+  recovery and preserve the existing playback-error and watchdog handling.
 - Disconnect keeps cached playback running. Player reconciles finished item IDs
-  before accepting a reconnect snapshot; a missing room drains its cached queue
-  before returning to welcome. Explicit room closure stops immediately;
+  before accepting a reconnect snapshot. A missing room drains its cached queue
+  without recycling played songs before returning to welcome. Explicit room closure stops immediately;
   opening another Player never takes over or stops existing Players.
 - Preserve the current YouTube iframe and controls. The multi-monitor hover-overlay
   issue is deferred; do not recreate the iframe per song or use deprecated `autohide`.
@@ -140,8 +134,8 @@ There is no frontend bundler or compilation step.
 Use `bun install`, `bun start`, and `bun run test`. Test code launches Node,
 binds temporary localhost ports, copies source into a temporary directory, and
 mocks YouTube responses and simulates UI/drag events; it does not exercise actual IFrame audio or browser drag/drop.
-For Player/UI changes, follow the browser/TV checklist in README, including Guest
-requests, Admin controls, queue synchronization, refresh, and unauthenticated access.
+For Player/UI changes, run `node scripts/test-browser.mjs` with an available
+Chromium. Hardware verification covers TV navigation, autoplay and audio.
 The standalone `check-llm` script is retained for future AI work.
 
 For deployment changes, check `docker compose config --quiet`, build the image,

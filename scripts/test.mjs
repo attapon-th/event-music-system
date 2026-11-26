@@ -280,8 +280,26 @@ try {
   assert.equal(delegated.messages.at(-1).role, "controller");
   assert.equal(admin.messages.at(-1).role, "admin");
   assert.equal(player.messages.at(-1).role, "player");
+  const roomSettings = { keepQueue: false, showPlayerQr: true, showPlayerQueue: true, allowQueueJoin: true };
+  for (const [setting, initial] of Object.entries(roomSettings)) {
+    assert.equal(player.snapshot[setting], initial);
+    for (const unauthorized of [guest, player]) {
+      const before = unauthorized.messages.filter(message => message.type === "error").length;
+      send(unauthorized, "setRoomSetting", { setting, enabled: !initial });
+      await waitFor(() => unauthorized.messages.filter(message => message.type === "error").length === before + 1);
+    }
+    assert.equal(player.snapshot[setting], initial);
+    send(admin, "setRoomSetting", { setting, enabled: !initial });
+    await waitFor(() => player.snapshot[setting] === !initial && guest.snapshot[setting] === !initial);
+    assert.equal(otherPlayer.snapshot[setting], initial, "Room settings stay within the room");
+    send(admin, "setRoomSetting", { setting, enabled: initial });
+    await waitFor(() => player.snapshot[setting] === initial);
+  }
   send(admin, "setParticipantRole", { id: delegate.memberId, enabled: false });
   await waitFor(() => delegated.messages.at(-1)?.role === "guest");
+  send(delegated, "setRoomSetting", { setting: "keepQueue", enabled: true });
+  await waitFor(() => delegated.messages.some(message => message.type === "error"));
+  assert.equal(player.snapshot.keepQueue, false, "A Guest cannot change room settings");
   send(guest, "setVolume", { volume: 29 });
   await waitFor(() => admin.snapshot.volume === 29);
   send(guest, "setAutoQueue", { enabled: false });
@@ -546,6 +564,66 @@ try {
   assert.equal(otherRandomRoom.code, codes[1]);
   assert.notEqual(otherRandomRoom.sessionId, randomRoom.sessionId);
   assert.equal((await post("/api/sessions/random", { code: "1234" })).status, 400);
+  const autoAssigned = await Promise.all(Array.from({ length: 4 }, async () => {
+    const response = await post("/api/sessions/random", {});
+    assert.equal(response.status, 200);
+    return response.json();
+  }));
+  assert.equal(new Set(autoAssigned.map(room => room.code)).size, autoAssigned.length);
+  assert.ok(autoAssigned.every(room => /^[1-9][0-9]{2}$/.test(room.code) && room.role === "player"));
+
+  const loopRoom = autoAssigned[0];
+  const loopAdminToken = (await joinMember(loopRoom)).token;
+  const loopAdmin = await socket(loopAdminToken);
+  const loopPlayer = await socket(loopRoom.token);
+  const loopRoomEntryCode = loopRoom.code + [...loopRoom.code].reduce((sum, digit) => sum + Number(digit), 0);
+  const loopPlayer2 = await socket((await (await post("/api/sessions", {
+    code: loopRoomEntryCode,
+  })).json()).token);
+  send(loopAdmin, "setAutoQueue", { enabled: false });
+  send(loopAdmin, "setRoomSetting", { setting: "keepQueue", enabled: true });
+  await waitFor(() => loopPlayer.snapshot.keepQueue && !loopPlayer.snapshot.autoQueue);
+  const loopVideo = { videoId: "loop0000001", title: "Loop", duration: "3:20", clientId: "loop" };
+  assert.equal((await post("/api/request", loopVideo, loopAdminToken)).status, 200);
+  await waitFor(() => loopPlayer.snapshot.nowPlaying?.videoId === loopVideo.videoId);
+  const original = loopPlayer.snapshot.nowPlaying;
+  const ended = { id: original.id, videoId: original.videoId };
+  send(loopPlayer, "ended", ended);
+  send(loopPlayer2, "ended", ended);
+  await waitFor(() => loopPlayer.snapshot.nowPlaying?.id === `${original.id}:1`);
+  send(loopPlayer2, "error", ended);
+  send(loopAdmin, "pause");
+  await waitFor(() => loopPlayer.snapshot.paused);
+  assert.equal(loopPlayer.snapshot.historyCount, 1, "Duplicate completion did not advance the single-track loop");
+  const loopRecovered = await socket(loopRoom.token, undefined, { sessionId: loopRoom.sessionId, completed: [
+    { id: `${original.id}:1`, videoId: original.videoId, failed: false },
+    { id: `${original.id}:2`, videoId: original.videoId, failed: false },
+  ] });
+  assert.equal(loopRecovered.snapshot.nowPlaying.id, `${original.id}:3`);
+  const existingGuest = await joinMember(loopRoom);
+  assert.equal(existingGuest.role, "guest", "New rooms admit guests by default");
+  send(loopAdmin, "setRoomSetting", { setting: "allowQueueJoin", enabled: false });
+  await waitFor(() => !loopPlayer.snapshot.allowQueueJoin);
+  const numberJoin = { code: loopRoom.code };
+  const qrJoin = { ...numberJoin, sessionId: loopRoom.sessionId };
+  for (const body of [numberJoin, qrJoin]) {
+    const blocked = await post("/api/sessions/join", body);
+    assert.equal(blocked.status, 403, "A closed room denies new participants");
+    assert.deepEqual(await blocked.json(), { error: "ห้องนี้ปิดรับผู้เข้าร่วมจัดคิวใหม่" });
+  }
+  const otherRoomAdmin = await joinMember(autoAssigned[1]);
+  assert.equal(otherRoomAdmin.role, "admin", "Other rooms still admit new participants");
+  for (const token of [loopRoom.token, otherRoomAdmin.token]) {
+    assert.equal((await post("/api/sessions/join", qrJoin, token)).status, 403);
+  }
+  assert.deepEqual(await (await post("/api/sessions/join", numberJoin, existingGuest.token)).json(), existingGuest);
+  assert.equal((await joinMember(loopRoom, loopAdminToken)).role, "admin");
+  const addedPlayer = await (await post("/api/sessions", { code: loopRoomEntryCode })).json();
+  assert.equal(addedPlayer.role, "player");
+  assert.equal(addedPlayer.sessionId, loopRoom.sessionId);
+  send(loopAdmin, "setRoomSetting", { setting: "allowQueueJoin", enabled: true });
+  await waitFor(() => loopPlayer.snapshot.allowQueueJoin);
+  assert.equal((await joinMember(loopRoom)).role, "guest", "Reopening restores new participant admission");
   const lostAfterRestart = await socket();
   send(lostAfterRestart, "auth", { token: roomA.token, sessionId: roomA.sessionId, completed });
   await waitFor(() => lostAfterRestart.messages.some(msg => msg.type === "auth" && !msg.ok));
@@ -579,6 +657,30 @@ try {
   state.setPaused("yes");
   assert.equal(changes, 0);
   assert.equal(state.reorder([]), true);
+  const cycle = new JukeboxState();
+  cycle.setRoomSetting("keepQueue", true);
+  const add = (videoId, autoQueued = false) => cycle.add({ videoId, title: videoId, autoQueued }).item;
+  const first = add("first");
+  const second = add("second");
+  const third = add("third");
+  cycle.playNow(third.id);
+  assert.equal(cycle.nowPlaying.id, third.id);
+  assert.deepEqual(cycle.queue.map(item => item.id), [second.id, `${first.id}:1`]);
+  cycle.skip();
+  assert.equal(cycle.nowPlaying.id, second.id);
+  assert.deepEqual(cycle.queue.map(item => item.id), [`${first.id}:1`, `${third.id}:1`]);
+  cycle.advance(second.videoId, true);
+  assert.deepEqual(cycle.queue.map(item => item.id), [`${third.id}:1`], "Failed songs leave the cycle");
+  cycle.remove(`${third.id}:1`);
+  const automatic = add("automatic", true);
+  cycle.advance(first.videoId);
+  assert.equal(cycle.nowPlaying.id, automatic.id);
+  cycle.advance(automatic.videoId);
+  assert.equal(cycle.nowPlaying.id, `${first.id}:2`);
+  cycle.setRoomSetting("keepQueue", false);
+  cycle.advance(first.videoId);
+  assert.equal(cycle.nowPlaying, null);
+  assert.deepEqual(cycle.queue, []);
   assert.equal(existsSync(join(temp, "unexpected-ai-request")), false, "requests never call AI or fetch moderation metadata");
   console.log("PASS: checksum room creation/concurrent joins; multiple Players/deduplicated completion; Admin grant/revoke and Controller grant-only; isolated rooms/queues/settings; Auto Queue; heartbeat/expiry/in-flight requests; restart; lifecycle logs; rate limits; queue controls; Thailand search; unmodified video queries/order; AI disabled; validation.");
 } finally {

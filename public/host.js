@@ -10,7 +10,7 @@ let currentItemId = null;
 let playbackTarget = null;
 let appliedPaused = null;
 let latestState = { nowPlaying: null, queue: [] };
-let eventContext = "";
+let qrReady = false;
 let ws = null;
 let completedOffline = [];
 let completedSentCount = 0;
@@ -20,6 +20,7 @@ let roomLostMessage = null;
 
 // ---- WebSocket --------------------------------------------------------
 function stopLocalPlayer() {
+  if (exitDialog.open) exitDialog.close();
   clearTimeout(playbackWatchdog);
   if (playerReady && player?.stopVideo) player.stopVideo();
   currentVideoId = null;
@@ -49,8 +50,13 @@ function finishTrack(type, code) {
   }
   pendingCompletion = null;
   completedOffline.push({ id: track.id, videoId: track.videoId, failed: type === "error" });
-  latestState = { ...latestState, nowPlaying: latestState.queue[0] || null,
-    queue: latestState.queue.slice(1), paused: false };
+  const queue = [...latestState.queue];
+  if (latestState.keepQueue && !roomLostMessage && type !== "error" && !track.autoQueued) {
+    // Match the server's next occurrence ID so offline completions can reconcile in order.
+    const [id, cycle = "0"] = track.id.split(":");
+    queue.push({ ...track, id: `${id}:${Number(cycle) + 1}` });
+  }
+  latestState = { ...latestState, nowPlaying: queue.shift() || null, queue, paused: false };
   render(); syncPlayer();
   if (roomLostMessage && !latestState.nowPlaying) Room.finish(roomLostMessage);
 }
@@ -58,8 +64,9 @@ function finishTrack(type, code) {
 function connectWs() {
   function authData() {
     recovering = true;
-    completedSentCount = completedOffline.length;
-    return { completed: completedOffline.slice() };
+    const completed = completedOffline.slice(0, 51);
+    completedSentCount = completed.length;
+    return { completed };
   }
   ws = Room.connect({
     authData,
@@ -73,6 +80,7 @@ function connectWs() {
         return;
       }
       recovering = false;
+      document.getElementById("player-status").textContent = "";
       loadInfo();
     },
     onState(msg) {
@@ -80,17 +88,16 @@ function connectWs() {
       if (pendingCompletion && (pendingCompletion.id !== msg.state.nowPlaying?.id ||
           pendingCompletion.videoId !== msg.state.nowPlaying?.videoId)) pendingCompletion = null;
       latestState = msg.state;
-      eventContext = msg.eventContext;
-      render(); renderContext(); syncPlayer();
+      render(); syncPlayer();
     },
     onOffline() {
-      document.getElementById("guest-url").textContent = t("offlinePlayback");
+      document.getElementById("player-status").textContent = t("offlinePlayback");
       reportIfEnded();
     },
     onUnavailable(message) {
       if (!latestState.nowPlaying && !latestState.queue.length) return false;
       roomLostMessage = message;
-      document.getElementById("guest-url").textContent = t("roomLostPlayback");
+      document.getElementById("player-status").textContent = t("roomLostPlayback");
       reportIfEnded();
       return true;
     },
@@ -215,25 +222,21 @@ window.addEventListener("pageshow", (e) => {
 
 // ---- Rendering --------------------------------------------------------
 function render() {
-  const autoQueueToggle = document.getElementById("auto-queue-toggle");
-  autoQueueToggle.textContent = t("autoQueue", { state: t(latestState.autoQueue ? "On" : "Off") });
-  autoQueueToggle.setAttribute("aria-pressed", String(!!latestState.autoQueue));
-  autoQueueToggle.classList.toggle("on", !!latestState.autoQueue);
-  document.getElementById("auto-queue-status").textContent = autoQueueMessage(latestState);
+  renderPlayerPanels();
   const np = latestState.nowPlaying;
-  document.getElementById("now-label").classList.toggle("hidden", !np);
   document.getElementById("now-title").textContent = np ? np.title : "—";
   document.getElementById("now-channel").textContent = np
     ? [np.channel, np.autoQueued && t("autoQueued"), np.addedBy && t("requester", { name: np.addedBy })].filter(Boolean).join(" · ")
     : "";
 
+  if (latestState.showPlayerQueue === false) return;
   const queue = latestState.queue || [];
   document.getElementById("queue-count").textContent = queue.length;
   const ul = document.getElementById("queue");
   const focusedId = document.activeElement?.dataset.queueId;
   ul.innerHTML = "";
   if (queue.length === 0) {
-    ul.innerHTML = `<li class="q-empty">${t("Queue is empty — scan the QR to add a song.")}</li>`;
+    ul.innerHTML = `<li class="q-empty">${t("empty")}</li>`;
     if (focusedId) document.getElementById("skip").focus();
     return;
   }
@@ -262,10 +265,20 @@ function render() {
   }
 }
 
-function renderContext() {
-  const input = document.getElementById("context-input");
-  // Don't clobber the host's typing with a broadcast echo.
-  if (document.activeElement !== input) input.value = eventContext;
+function renderPlayerPanels() {
+  const sidebar = document.getElementById("player-sidebar");
+  const qrCard = document.getElementById("qr-card");
+  const queueCard = document.getElementById("player-queue-card");
+  const showQr = latestState.showPlayerQr !== false;
+  if (latestState.showPlayerQueue === false && queueCard.contains(document.activeElement)) {
+    document.getElementById("skip").focus();
+  }
+  qrCard.hidden = !showQr || !qrReady;
+  queueCard.hidden = latestState.showPlayerQueue === false;
+  sidebar.hidden = qrCard.hidden && queueCard.hidden;
+  document.getElementById("stage").classList.toggle("no-sidebar", sidebar.hidden);
+  document.getElementById("request-hint").textContent =
+    t(qrCard.hidden ? "requestFromQueue" : "Scan the QR code to add the first song!");
 }
 
 const PAUSE_SVG =
@@ -282,6 +295,12 @@ function updatePlayPauseIcon() {
 // ---- Controls ---------------------------------------------------------
 const playerWrap = document.getElementById("player-wrap");
 const fullscreenButton = document.getElementById("fullscreen");
+const exitButton = document.getElementById("exit-room");
+const exitDialog = document.getElementById("exit-dialog");
+function cancelExit() {
+  exitDialog.close();
+  exitButton.focus();
+}
 let fullscreenActive = false;
 let fullscreenHistory = false;
 function isVideoFullscreen() {
@@ -359,30 +378,24 @@ function focusInDirection(key, from, controls) {
 function handleEntryKey(e, key, target) {
   const entry = document.querySelector(".player-entry:not([hidden])");
   if (!entry || e.defaultPrevented || target?.closest("dialog[open]")) return;
-  const card = target?.closest(".room-option");
   const input = target?.tagName === "INPUT";
   if (key.startsWith("Arrow")) {
-    const vertical = key === "ArrowUp" || key === "ArrowDown";
-    if (input && !vertical) return; // Keep the numeric field's cursor keys.
+    if (input && ["ArrowLeft", "ArrowRight"].includes(key)) return;
     e.preventDefault();
-    if (vertical && card && card !== target && focusInDirection(key, target, visibleControls(card.querySelectorAll("input, button")))) return;
-    const controls = visibleControls(entry.querySelectorAll(".room-options-grid > .room-option, #start-btn, #install-app, #room-options-refresh"));
-    const from = card || target;
-    if (!focusInDirection(key, from, controls) && !controls.includes(from)) controls[0]?.focus();
+    const controls = visibleControls(entry.querySelectorAll("button, input"));
+    if (!focusInDirection(key, target, controls) && !controls.includes(target)) controls[0]?.focus();
     return;
   }
-  if (card && target !== card && ["Escape", "Back", "BrowserBack", "GoBack"].includes(key)) {
+  if (["Escape", "Back", "BrowserBack", "GoBack"].includes(key) && Room.closeEntry()) {
     e.preventDefault();
-    card.focus();
     return;
   }
   if (!["Enter", "Select", "Accept", "OK"].includes(key) || !entry.contains(target)) return;
-  if (input && e.key === "Enter") return; // Let the browser submit the form from a text field.
+  if (input && e.key === "Enter") return; // Native form submission handles Enter.
   e.preventDefault();
   if (e.repeat) return;
   if (target.tagName === "BUTTON") target.click();
-  else if (input && target.validity.valid) target.form.requestSubmit();
-  else if (target === card) card.querySelector("input")?.focus();
+  else if (input) target.form.requestSubmit();
 }
 
 function handleHostKey(e) {
@@ -393,24 +406,29 @@ function handleHostKey(e) {
     return;
   }
   const textInput = target?.matches('input:not([type="range"]), textarea, [contenteditable="true"]');
-  if (["Escape", "Back", "BrowserBack", "GoBack", "Backspace"].includes(key) && isVideoFullscreen()) {
+  if (["Escape", "Back", "BrowserBack", "GoBack", "Backspace"].includes(key) && (exitDialog.open || isVideoFullscreen())) {
     e.preventDefault();
-    if (!e.repeat) toggleFullscreen();
+    if (!e.repeat) {
+      if (exitDialog.open) cancelExit();
+      else toggleFullscreen();
+    }
     return;
   }
   if (e.defaultPrevented || textInput) return;
   if (key.startsWith("Arrow")) {
     if (target?.id === "volume" && ["ArrowLeft", "ArrowRight"].includes(key)) return;
     e.preventDefault();
-    const controls = isVideoFullscreen() ? [playerWrap] : visibleControls(document.querySelectorAll("button, input"));
+    const controls = exitDialog.open ? visibleControls(exitDialog.querySelectorAll("button"))
+      : isVideoFullscreen() ? [playerWrap] : visibleControls(document.querySelectorAll("button, input"));
     if (!focusInDirection(key, target, controls) && !controls.includes(target)) controls[0]?.focus();
     return;
   }
-  if (["Enter", "Select", "Accept"].includes(key) && target?.tagName === "BUTTON") {
+  if (["Enter", "Select", "Accept", "OK"].includes(key) && target?.tagName === "BUTTON") {
     e.preventDefault();
     if (!e.repeat) target.click();
     return;
   }
+  if (exitDialog.open) return;
   const action = key === " " || e.code === "Space" || key === "MediaPlayPause" ? "playpause"
     : key.toLowerCase() === "n" || key === "MediaTrackNext" ? "skip"
     : key.toLowerCase() === "f" ? "fullscreen" : null;
@@ -434,14 +452,19 @@ function wireControls() {
     send({ type: latestState.paused ? "play" : "pause" });
   };
   document.getElementById("skip").onclick = () => send({ type: "skip" });
-  document.getElementById("auto-queue-toggle").onclick = () => send({ type: "setAutoQueue", enabled: !latestState.autoQueue });
-  document.getElementById("qr-toggle").onclick = () => {
-    const card = document.getElementById("qr-card");
-    card.hidden = !card.hidden;
-    document.getElementById("qr-toggle").textContent = t(card.hidden ? "showQR" : "hideQR");
-    document.getElementById("qr-toggle").setAttribute("aria-pressed", String(card.hidden));
+  exitButton.onclick = () => {
+    if (typeof exitDialog.showModal === "function") exitDialog.showModal();
+    else if (window.confirm(t("confirmExitPlayer"))) Room.leave();
   };
-  document.getElementById("exit-room").onclick = () => Room.leave();
+  exitDialog.oncancel = (event) => {
+    event.preventDefault();
+    cancelExit();
+  };
+  document.getElementById("cancel-exit").onclick = cancelExit;
+  document.getElementById("confirm-exit").onclick = () => {
+    exitDialog.close();
+    Room.leave();
+  };
   const volEl = document.getElementById("volume");
   const paintVol = () => volEl.style.setProperty("--vol", `${volEl.value}%`);
   paintVol();
@@ -449,45 +472,33 @@ function wireControls() {
     paintVol();
     send({ type: "setVolume", volume: Number(volEl.value) });
   };
-  // Event-context editor: the Event context pill reveals an input; Save sends it.
-  const ctxRow = document.getElementById("context-row");
-  const ctxInput = document.getElementById("context-input");
-  document.getElementById("context-toggle").onclick = () => {
-    ctxRow.classList.toggle("hidden");
-    if (!ctxRow.classList.contains("hidden")) ctxInput.focus();
-  };
-  document.getElementById("context-save").onclick = () => {
-    send({ type: "setEventContext", context: ctxInput.value.trim() });
-    ctxRow.classList.add("hidden");
-    document.getElementById("context-toggle").focus();
-  };
-  ctxInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      document.getElementById("context-save").click();
-    }
-  });
-
   document.addEventListener("keydown", handleHostKey);
 }
 
 // ---- Bootstrap --------------------------------------------------------
 async function loadInfo() {
+  const sessionId = Room.sessionId;
   try {
     const info = await Room.fetch("/api/info");
+    if (sessionId !== Room.sessionId) return;
+    const guestUrl = new URL(info.guestUrl);
     document.getElementById("qr").src = info.qr;
-    document.getElementById("guest-url").textContent = `ห้อง ${info.code} · yt1.lkzlab.uk/guest`;
+    document.getElementById("guest-url").textContent = guestUrl.host + guestUrl.pathname;
+    qrReady = true;
+    renderPlayerPanels();
   } catch {
-    document.getElementById("guest-url").textContent = t("Could not load guest link");
+    if (sessionId === Room.sessionId && !qrReady) {
+      document.getElementById("player-status").textContent = t("Could not load guest link");
+    }
   }
 }
 function openPlayer() {
   started = true;
   autoplayBlocked = false;
   document.getElementById("playpause").classList.remove("needs-play");
-  document.getElementById("qr-card").hidden = true;
-  document.getElementById("qr-toggle").textContent = t("showQR");
-  document.getElementById("qr-toggle").setAttribute("aria-pressed", "true");
+  qrReady = false;
+  document.getElementById("player-status").textContent = "";
+  document.getElementById("player-room-label").textContent = t("roomCode", { code: Room.code });
   currentVideoId = null;
   currentItemId = null;
   appliedPaused = null;
@@ -497,7 +508,7 @@ function openPlayer() {
   recovering = false;
   pendingCompletion = null;
   roomLostMessage = null;
-  loadInfo();
+  render();
   connectWs();
   document.getElementById("playpause").focus();
 }
